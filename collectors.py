@@ -27,7 +27,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 # 파일이 섞였는지 눈으로 확인하기 위한 표시. 세 파일의 값이 같아야 한다.
-BUILD = "2026-09-01.51"
+BUILD = "2026-09-01.53"
 
 KST = timezone(timedelta(hours=9))
 
@@ -1522,7 +1522,7 @@ def build_collectors() -> list[Collector]:
             ),
             kind="product",
             url_template="https://shopping.naver.com/window-products/catalog/{id}",
-            interval=900,
+            interval=1200,
             limit=PRODUCT_LIMIT,
             note="일간 구매 기준 전체 카테고리",
         ),
@@ -1540,7 +1540,7 @@ def build_collectors() -> list[Collector]:
             ],
             kind="product",
             url_template="https://www.11st.co.kr/products/{id}",
-            interval=900,
+            interval=1200,
             limit=PRODUCT_LIMIT,
             note="전체 베스트 상위 100개",
         ),
@@ -1555,7 +1555,7 @@ def build_collectors() -> list[Collector]:
             link_base="https://itempage3.auction.co.kr/",
             charset="euc-kr",
             warmup_url="https://www.auction.co.kr/",
-            interval=900,
+            interval=1200,
             limit=PRODUCT_LIMIT,
         ),
 
