@@ -61,7 +61,6 @@ a{color:inherit;text-decoration:none}
 .seg button:focus-visible{outline:2px solid var(--down);outline-offset:-2px}
 .countdown{font-size:12px;color:var(--muted);min-width:92px;text-align:right}
 .countdown.busy{color:var(--up);font-weight:600}
-.due{font-variant-numeric:tabular-nums}
 .collecting{color:var(--up);font-weight:600}
 .pulse{
   display:inline-block;width:6px;height:6px;margin-right:5px;
@@ -212,7 +211,7 @@ a.entry:hover .title{text-decoration-color:var(--muted)}
 <main class="board" id="board"></main>
 
 <script>
-const DASHBOARD_BUILD = "2026-09-01.55";
+const DASHBOARD_BUILD = "2026-09-01.57";
 
 const ACCENT = {
   naver_datalab_keyword:'#03C75A',
@@ -238,7 +237,6 @@ let timer = null;
 let ticker = null;
 let lightPoll = null;
 let nextDueAt = null;          // 서버가 알려준 다음 수집 예정 시각
-let nextDueLabel = '';         // 그게 어느 소스인지
 let staticNextDue = null;      // 정적 배포에서 계산한 다음 예정 시각(ISO)
 let staticEverySec = 0;        // 정적 배포에서 파일이 다시 만들어지는 주기
 let runningCount = 0;          // 서버가 지금 수집 중인 소스 수
@@ -260,10 +258,6 @@ function cycleText(sec){
   return `${sec}초마다 수집`;
 }
 
-const clockHM = iso => iso
-  ? new Date(iso).toLocaleTimeString('ko-KR', {hour12:false, hour:'2-digit', minute:'2-digit'})
-  : '';
-
 /* 남은 시간을 초 단위까지 적는다. 1초마다 다시 그려서 실제로 흘러가게 보인다. */
 function remainText(sec){
   if (sec <= 0) return '곧 수집';
@@ -275,14 +269,7 @@ function remainText(sec){
   return `${s}초`;
 }
 
-/* 패널마다 붙은 남은 시간을 갱신한다. 화면 전체를 다시 그리지 않는다. */
-function paintDues(){
-  document.querySelectorAll('[data-due]').forEach(el => {
-    const at = new Date(el.dataset.due).getTime();
-    if (isNaN(at)) { el.textContent = ''; return; }
-    el.textContent = remainText(Math.round((at - Date.now()) / 1000));
-  });
-}
+
 
 function renderRow(item, key){
   const tag  = item.url ? 'a' : 'div';
@@ -387,12 +374,7 @@ function renderPanel(src){
       </div>
       ${periodPicker}
       <div class="sub">${sub}</div>
-      <div class="sub">${cycleText(staticMode && staticEverySec ? staticEverySec : src.interval)}${
-        (() => {
-          const due = staticMode ? staticNextDue : (src.enabled && !src.running ? src.nextDue : null);
-          return due ? `. 다음 수집까지 <span class="due" data-due="${esc(due)}"></span>` : '';
-        })()
-      }</div>
+      <div class="sub">${cycleText(staticMode && staticEverySec ? staticEverySec : src.interval)}</div>
     </div>
     ${tabs}
     ${inner}
@@ -471,22 +453,19 @@ async function loadOnce(){
     .map(row => `<div class="row cols-${row.length}">${row.map(renderPanel).join('')}</div>`)
     .join('');
   board.querySelectorAll('.list, .groups').forEach((el,i) => el.scrollTop = scroll[i] ?? 0);
-  paintDues();
 
   runningCount = data.sources.filter(s => s.running).length;
   const done = data.sources.map(s => s.fetchedAt).filter(Boolean).sort().pop();
   if (done) lastDoneAt = done;
   if (staticMode){
     nextDueAt = staticNextDue ? new Date(staticNextDue).getTime() : null;
-    nextDueLabel = '';
   } else {
+    // 소스마다 주기가 다르므로 가장 이른 것을 기준으로 센다
     const dues = data.sources
       .filter(s => s.enabled && s.nextDue)
-      .map(s => ({ at: new Date(s.nextDue).getTime(), label: s.label }))
-      .filter(x => !isNaN(x.at))
-      .sort((a, b) => a.at - b.at);
-    nextDueAt = dues.length ? dues[0].at : null;
-    nextDueLabel = dues.length ? dues[0].label : '';
+      .map(s => new Date(s.nextDue).getTime())
+      .filter(at => !isNaN(at));
+    nextDueAt = dues.length ? Math.min(...dues) : null;
   }
   paintCountdown();
   const live = data.sources.filter(s => s.items.length).length;
@@ -535,9 +514,7 @@ function paintCountdown(){
     return;
   }
   const left = Math.max(0, Math.round((nextDueAt - Date.now()) / 1000));
-  const where = nextDueLabel ? ` (${nextDueLabel})` : '';
-  const about = staticMode ? ' 예정' : '';
-  el.textContent = `다음 수집까지 ${remainText(left)}${where}${about}`;
+  el.textContent = `다음 수집까지 ${remainText(left)}${staticMode ? ' 예정' : ''}`;
 }
 
 /* 화면 다시 그리기와 재수집은 다른 일이다.
@@ -549,7 +526,7 @@ function startLightPoll(){
   if (lightPoll) clearInterval(lightPoll);
   lightPoll = setInterval(load, LIGHT_POLL_MS);
   if (ticker) clearInterval(ticker);
-  ticker = setInterval(() => { paintCountdown(); paintDues(); }, 1000);
+  ticker = setInterval(paintCountdown, 1000);
 }
 
 document.getElementById('board').addEventListener('click', async e => {
