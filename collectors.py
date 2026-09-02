@@ -27,7 +27,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 # 파일이 섞였는지 눈으로 확인하기 위한 표시. 세 파일의 값이 같아야 한다.
-BUILD = "2026-09-01.61"
+BUILD = "2026-09-01.64"
 
 KST = timezone(timedelta(hours=9))
 
@@ -235,6 +235,20 @@ def dig(data: Any, path: str) -> Any:
 PRICE_RE = re.compile(r"([0-9][0-9,]{2,})\s*원")
 
 
+# 가격 전용 요소 안에서는 '원' 없이 숫자만 있는 경우도 가격으로 본다
+BARE_NUMBER_RE = re.compile(r"^[^0-9]{0,4}([0-9]{1,3}(?:,[0-9]{3})+)[^0-9]{0,6}$")
+
+
+def parse_bare_number(text: str | None) -> int | None:
+    m = BARE_NUMBER_RE.match((text or "").strip())
+    if not m:
+        return None
+    try:
+        return int(m.group(1).replace(",", ""))
+    except ValueError:
+        return None
+
+
 def parse_price(text: str | None) -> int | None:
     if not text:
         return None
@@ -428,16 +442,46 @@ class LinkHarvestCollector(Collector):
                     return t
         return None
 
-    @staticmethod
-    def _price_of(anchor) -> int | None:
-        block = anchor.find_parent(["li", "div", "article"])
-        for node in (block, anchor):
-            if node is None:
-                continue
+    PRICE_SELECTOR = (
+        "[class*=price], [class*=Price], [class*=sale], [class*=Sale], "
+        "[class*=cost], [class*=amount], [class*=won], strong"
+    )
+
+    @classmethod
+    def _price_of(cls, anchor) -> tuple[int | None, str | None]:
+        """
+        가격을 찾는다. 쿠폰을 적용한 가격이 있으면 그것을 먼저 쓴다.
+
+        사이트마다 '원'을 붙이는 자리도, 감싸는 깊이도 달라서
+        링크 주변을 몇 단계 위까지 훑고, 가격처럼 보이는 요소도 따로 본다.
+        돌려주는 값은 (가격, 표시할 말)이다.
+        """
+        node = anchor
+        for _ in range(4):
+            if node is None or getattr(node, "name", None) is None:
+                break
+
+            # 1) 쿠폰이 적힌 자리를 먼저 본다
+            for tag in node.find_all(True, recursive=True):
+                text = tag.get_text(" ", strip=True)
+                if "쿠폰" not in text or len(text) > 40:
+                    continue
+                price = parse_price(text) or parse_bare_number(text)
+                if price:
+                    return price, "쿠폰적용가"
+
+            # 2) 가격 전용 요소
+            for tag in node.select(cls.PRICE_SELECTOR):
+                text = tag.get_text(" ", strip=True)
+                price = parse_price(text) or parse_bare_number(text)
+                if price:
+                    return price, None
+
             price = parse_price(node.get_text(" ", strip=True))
             if price:
-                return price
-        return None
+                return price, None
+            node = node.parent
+        return None, None
 
     @staticmethod
     def _image_of(anchor) -> str | None:
@@ -509,17 +553,22 @@ class LinkHarvestCollector(Collector):
                 untitled += 1
                 continue
             seen.add(pid)
+            price, price_note = self._price_of(anchor)
             items.append(
                 Item(
                     rank=len(items) + 1,
                     title=title,
                     url=urllib.parse.urljoin(self.link_base, href),
-                    price=self._price_of(anchor),
+                    price=price,
                     image=self._image_of(anchor),
+                    meta=price_note,
                 )
             )
             if len(items) >= self.limit:
                 break
+
+        if items and not any(i.price for i in items):
+            self.warning = "가격을 읽지 못했습니다. 페이지 구조가 바뀌었을 수 있습니다."
 
         if not items:
             if matched == 0:
@@ -546,6 +595,11 @@ TITLE_KEYS = (
 ID_KEYS = (
     "productId", "productNo", "prdNo", "goodsNo", "nvMid", "itemNo",
     "catalogId", "id", "no",
+)
+# 쿠폰을 적용한 가격. 있으면 이쪽을 먼저 쓴다.
+COUPON_PRICE_KEYS = (
+    "couponPrice", "cpnPrice", "couponAppliedPrice", "couponDscPrice",
+    "couponDiscountPrice", "cardCouponPrice", "finalCouponPrice",
 )
 PRICE_KEYS = (
     "finalDscPrice", "discountedSalePrice", "finalPrice", "finalDiscountPrice",
@@ -811,6 +865,7 @@ def rows_to_items(rows: list[dict], *, url_template: str | None, title_key: str 
     if not tkey:
         raise RuntimeError(f"제목에 해당하는 키를 찾지 못했습니다. 있는 키: {list(sample)[:12]}")
     ikey = _first_key(sample, ID_KEYS)
+    ckey = _first_key(sample, COUPON_PRICE_KEYS)
     pkey = _first_key(sample, PRICE_KEYS)
     gkey = _first_key(sample, IMAGE_KEYS)
     ukey = _first_key(sample, URL_KEYS)
@@ -824,14 +879,20 @@ def rows_to_items(rows: list[dict], *, url_template: str | None, title_key: str 
         if not url and url_template and ikey and row.get(ikey) is not None:
             url = url_template.format(id=row[ikey])
         price = None
-        if pkey and row.get(pkey) is not None:
+        meta = None
+        if ckey and row.get(ckey) not in (None, "", 0):
+            with contextlib.suppress(ValueError, TypeError):
+                price = int(str(row[ckey]).replace(",", ""))
+                meta = "쿠폰적용가"
+        if price is None and pkey and row.get(pkey) is not None:
             with contextlib.suppress(ValueError, TypeError):
                 price = int(str(row[pkey]).replace(",", ""))
         image = row.get(gkey) if gkey else None
         if isinstance(image, str) and image.startswith("//"):
             image = "https:" + image
         items.append(
-            Item(rank=len(items) + 1, title=title, url=url, price=price, image=image)
+            Item(rank=len(items) + 1, title=title, url=url, price=price,
+                 image=image, meta=meta)
         )
     return items
 
