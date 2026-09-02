@@ -27,14 +27,14 @@ import httpx
 from bs4 import BeautifulSoup
 
 # 파일이 섞였는지 눈으로 확인하기 위한 표시. 세 파일의 값이 같아야 한다.
-BUILD = "2026-09-01.43"
+BUILD = "2026-09-01.49"
 
 KST = timezone(timedelta(hours=9))
 
 # 소스마다 받아올 최대 개수. 소스별로 다르게 하려면 각 수집기의 limit 을 따로 주면 된다.
 DEFAULT_LIMIT = 30
 # 쇼핑몰 베스트처럼 목록이 긴 소스에 쓰는 값
-PRODUCT_LIMIT = 50
+PRODUCT_LIMIT = 100
 
 # 데이터랩이 쓰는 집계 단위. 화면에서 고를 수 있게 소스에 붙인다.
 PERIODS = {"date": "일간", "week": "주간", "month": "월간"}
@@ -1542,7 +1542,7 @@ def build_collectors() -> list[Collector]:
             url_template="https://www.11st.co.kr/products/{id}",
             interval=900,
             limit=PRODUCT_LIMIT,
-            note="전체 베스트 상위 50개",
+            note="전체 베스트 상위 100개",
         ),
 
         # ---- 5. 옥션 베스트 (링크 패턴 기반, 검증 필요)
@@ -1557,7 +1557,6 @@ def build_collectors() -> list[Collector]:
             warmup_url="https://www.auction.co.kr/",
             interval=900,
             limit=PRODUCT_LIMIT,
-            note="상품 상세 링크(ItemNo) 기준으로 순위를 복원합니다. G마켓과 같은 회사라 같이 막힐 수 있습니다.",
         ),
 
     ]

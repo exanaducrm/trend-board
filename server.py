@@ -51,8 +51,6 @@ COLLECTORS: list[Collector] = build_collectors()
 
 # key -> 최신 결과
 CACHE: dict[str, SourceResult] = {}
-# key -> {제목: 직전 순위}  (변동 화살표 계산용)
-PREV_RANKS: dict[str, dict[str, int]] = {}
 # key -> 다음 수집 예정 시각
 NEXT_DUE: dict[str, datetime] = {}
 # 지금 수집 중인 소스
@@ -84,7 +82,6 @@ def save_state() -> None:
                 for k, v in CACHE.items()
                 if v.items
             },
-            "prev": PREV_RANKS,
             "nextDue": {k: v.isoformat() for k, v in NEXT_DUE.items()},
             "build": BUILD,
         }
@@ -128,8 +125,6 @@ def load_state() -> None:
             with contextlib.suppress(ValueError):
                 result.fetched_at = datetime.fromisoformat(saved["fetchedAt"])
         CACHE[key] = result
-
-    PREV_RANKS.update(payload.get("prev") or {})
 
     # 고른 기간은 일부러 복원하지 않는다. 켤 때마다 일간으로 시작한다.
 
@@ -176,9 +171,6 @@ async def refresh_one(collector: Collector, client: httpx.AsyncClient) -> None:
         RUNNING.discard(collector.key)
 
     if result.ok and result.items:
-        old = CACHE.get(collector.key)
-        if old and old.ok and old.items:
-            PREV_RANKS[collector.key] = {i.title: i.rank for i in old.items}
         CACHE[collector.key] = result
         log.info("수집 완료 %s — %d건", collector.key, len(result.items))
         if result.warning:
@@ -293,11 +285,6 @@ def build_snapshot() -> dict:
     for c in COLLECTORS:
         result = CACHE.get(c.key) or _placeholder(c)
         data = result.to_dict()
-        prev = PREV_RANKS.get(c.key, {})
-        for item in data["items"]:
-            before = prev.get(item["title"])
-            item["delta"] = None if before is None else before - item["rank"]
-            item["isNew"] = bool(prev) and before is None
         data["nextDue"] = (
             NEXT_DUE[c.key].isoformat() if c.key in NEXT_DUE else None
         )
@@ -318,27 +305,6 @@ def build_snapshot() -> dict:
 @app.get("/api/snapshot")
 async def snapshot() -> JSONResponse:
     return JSONResponse(build_snapshot())
-
-
-REFRESH_LOCK = asyncio.Lock()
-
-
-@app.post("/api/refresh-all")
-async def refresh_all() -> JSONResponse:
-    """사용자가 누른 전체 새로고침. 켜져 있는 소스를 지금 바로 다시 수집한다."""
-    if REFRESH_LOCK.locked():
-        return JSONResponse({"error": "이미 수집 중입니다."}, status_code=409)
-    async with REFRESH_LOCK:
-        targets = [c for c in COLLECTORS if c.enabled]
-        async with httpx.AsyncClient(
-            timeout=20.0, follow_redirects=True, limits=httpx.Limits(max_connections=8)
-        ) as client:
-            await asyncio.gather(
-                *(refresh_one(c, client) for c in targets), return_exceptions=True
-            )
-    save_state()
-    ok = sum(1 for c in targets if CACHE[c.key].ok)
-    return JSONResponse({"refreshed": len(targets), "ok": ok})
 
 
 async def refresh_in_background(collector: Collector) -> None:
@@ -371,19 +337,6 @@ async def set_period(key: str, body: dict, tasks: BackgroundTasks) -> JSONRespon
     return JSONResponse({"started": True, "period": period})
 
 
-@app.post("/api/refresh/{key}")
-async def refresh(key: str, tasks: BackgroundTasks) -> JSONResponse:
-    target = next((c for c in COLLECTORS if c.key == key), None)
-    if target is None:
-        return JSONResponse({"error": "그런 소스가 없습니다."}, status_code=404)
-    if not target.enabled:
-        return JSONResponse({"error": "아직 설정이 끝나지 않은 소스입니다."}, status_code=409)
-    NEXT_DUE.pop(key, None)
-    RUNNING.add(key)
-    tasks.add_task(refresh_in_background, target)
-    return JSONResponse({"started": True})
-
-
 def load_demo() -> None:
     """--demo 로 띄우면 네트워크 없이 화면만 확인할 수 있다."""
     cats = __import__("collectors").NAVER_CIDS
@@ -396,9 +349,9 @@ def load_demo() -> None:
                     "니트", "아우터", "바지", "스커트", "바지"])
             for _cid, name in cats
         ],
-        "snx_best": [(None, [f"네이버쇼핑 인기상품 {i}" for i in range(1, 51)])],
-        "elevenst_best": [(None, [f"11번가 베스트 {i}" for i in range(1, 51)])],
-        "auction_best": [(None, [f"옥션 베스트 {i}" for i in range(1, 51)])],
+        "snx_best": [(None, [f"네이버쇼핑 인기상품 {i}" for i in range(1, 101)])],
+        "elevenst_best": [(None, [f"11번가 베스트 {i}" for i in range(1, 101)])],
+        "auction_best": [(None, [f"옥션 베스트 {i}" for i in range(1, 101)])],
     }
     for c in COLLECTORS:
         rows = samples.get(c.key)
@@ -549,24 +502,57 @@ async def from_curl(path: str) -> None:
 
 async def export_snapshot(path: str) -> None:
     """
-    켜져 있는 소스를 한 번씩 수집해 결과를 JSON 파일로 저장한다.
+    켜져 있는 소스를 수집해 결과를 JSON 파일로 저장한다.
     깃허브 액션처럼 서버를 띄울 수 없는 곳에서 화면에 쓸 자료를 만들기 위한 것.
+
+    기간을 고를 수 있는 소스는 일간/주간/월간을 모두 받아 함께 담는다.
+    서버가 없어도 화면에서 버튼만 눌러 바꿔 볼 수 있게 하기 위해서다.
     """
     for c in COLLECTORS:
         CACHE[c.key] = _placeholder(c)
     load_state()
 
     targets = [c for c in COLLECTORS if c.enabled]
-    async with httpx.AsyncClient(
-        timeout=30.0, follow_redirects=True, limits=httpx.Limits(max_connections=8)
-    ) as client:
-        await asyncio.gather(
-            *(refresh_one(c, client) for c in targets), return_exceptions=True
-        )
+    period_sources = [c for c in targets if getattr(c, "period", None)]
+    plain_sources = [c for c in targets if not getattr(c, "period", None)]
+
+    limits = httpx.Limits(max_connections=8)
+    per_period: dict[str, dict[str, dict]] = {}
+
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True, limits=limits) as client:
+        if plain_sources:
+            await asyncio.gather(
+                *(refresh_one(c, client) for c in plain_sources), return_exceptions=True
+            )
+
+        # 마지막에 일간이 남도록 역순으로 돈다. 화면 기본값이 일간이어야 한다.
+        for period in ("month", "week", "date"):
+            if not period_sources:
+                break
+            for c in period_sources:
+                c.period = period
+                NEXT_DUE.pop(c.key, None)
+            print(f"\n[{PERIODS[period]}] 수집")
+            await asyncio.gather(
+                *(refresh_one(c, client) for c in period_sources), return_exceptions=True
+            )
+            for c in period_sources:
+                r = CACHE[c.key]
+                per_period.setdefault(c.key, {})[period] = {
+                    "items": [i.to_dict() for i in r.items],
+                    "note": r.note,
+                    "warning": r.warning,
+                    "ok": r.ok,
+                    "error": r.error,
+                }
 
     data = build_snapshot()
     data["static"] = True          # 화면이 정적 배포임을 알아채는 표시
     data.pop("dashboardPath", None)
+    for src in data["sources"]:
+        if src["key"] in per_period:
+            src["periodItems"] = per_period[src["key"]]
+
     out = Path(path)
     out.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
 
@@ -576,6 +562,11 @@ async def export_snapshot(path: str) -> None:
     for c in targets:
         r = CACHE[c.key]
         state = f"{len(r.items)}건" if r.ok else f"실패 ({r.error})"
+        if c.key in per_period:
+            counts = ", ".join(
+                f"{PERIODS[p]} {len(v['items'])}건" for p, v in per_period[c.key].items()
+            )
+            state = counts
         print(f"  {c.label:28} {state}")
     print()
     if ok == 0:

@@ -117,13 +117,6 @@ a{color:inherit;text-decoration:none}
 .panel-head .sub{margin-top:3px;font-size:11.5px;color:var(--muted)}
 .panel-head .sub .warn{color:var(--up)}
 .panel-head .sub .soft-warn{color:var(--new)}
-.iconbtn{
-  appearance:none;border:1px solid var(--hairline);background:transparent;
-  border-radius:2px;font:inherit;font-size:11.5px;color:var(--muted);
-  padding:2px 7px;cursor:pointer;white-space:nowrap;
-}
-.iconbtn:hover{color:var(--ink);border-color:var(--muted)}
-.iconbtn:disabled{opacity:.4;cursor:default}
 
 .seg.mini{margin-top:8px;width:fit-content}
 .seg.mini button{padding:3px 10px;font-size:11.5px}
@@ -163,7 +156,6 @@ a.centry:focus-visible{outline:2px solid var(--down);outline-offset:-2px}
 }
 .row.cols-1 .centry{padding:2.5px 3px}
 a.centry:hover .ctitle{text-decoration:underline;text-decoration-color:var(--muted)}
-.centry .delta{width:auto;min-width:26px;font-size:10.5px;text-align:right}
 
 .tabs{display:flex;gap:5px;overflow-x:auto;padding:8px 13px;border-bottom:1px solid var(--hairline);scrollbar-width:thin}
 .tabs button{
@@ -184,10 +176,6 @@ a.entry:focus-visible{outline:2px solid var(--down);outline-offset:-2px}
   font-size:13px;font-weight:650;color:var(--muted);
 }
 .rank.top{color:var(--ink)}
-.delta{width:34px;flex:none;font-size:11px;font-weight:600;color:var(--muted)}
-.delta.up{color:var(--up)}
-.delta.down{color:var(--down)}
-.delta.new{color:var(--new)}
 .thumb{width:30px;height:30px;flex:none;object-fit:cover;border-radius:2px;background:#EDEFEA}
 .body{flex:1;min-width:0}
 .title{
@@ -197,8 +185,6 @@ a.entry:focus-visible{outline:2px solid var(--down);outline-offset:-2px}
 a.entry .title{text-decoration:underline;text-decoration-color:transparent;transition:text-decoration-color .12s}
 a.entry:hover .title{text-decoration-color:var(--muted)}
 .price{font-size:12px;color:var(--muted);font-weight:600}
-.moved{animation:flash 1.6s ease-out}
-@keyframes flash{from{background:#FBF1CF}to{background:transparent}}
 
 .empty{padding:22px 14px;color:var(--muted);font-size:12.5px;line-height:1.6}
 .empty code{background:#EDEFEA;padding:1px 4px;border-radius:2px;font-size:11.5px}
@@ -206,7 +192,6 @@ a.entry:hover .title{text-decoration-color:var(--muted)}
 .panel.blocked{opacity:.72}
 .panel.blocked .panel-head{background:#F4F1EC}
 
-@media (prefers-reduced-motion:reduce){.moved{animation:none}}
 @media (max-width:520px){
   .board{padding:12px}
   .masthead{padding:12px 14px 10px}
@@ -226,7 +211,7 @@ a.entry:hover .title{text-decoration-color:var(--muted)}
 <main class="board" id="board"></main>
 
 <script>
-const DASHBOARD_BUILD = "2026-09-01.43";
+const DASHBOARD_BUILD = "2026-09-01.49";
 
 const ACCENT = {
   naver_datalab_keyword:'#03C75A',
@@ -259,7 +244,7 @@ let loading = false;           // 지금 불러오는 중인지 (겹쳐 도는 �
 let everFailed = false;        // 한 번이라도 실패했는지
 let lastDoneAt = null;         // 마지막으로 수집이 끝난 시각
 let activeTab = {};              // key -> 선택된 카테고리
-const prevRank = {};             // key -> {title: rank}  (변동 하이라이트용)
+const staticPeriod = {};         // key -> 정적 배포에서 고른 기간
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g,
   c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -276,23 +261,13 @@ const clockHM = iso => iso
   ? new Date(iso).toLocaleTimeString('ko-KR', {hour12:false, hour:'2-digit', minute:'2-digit'})
   : '';
 
-function deltaCell(item){
-  if (item.isNew) return `<span class="delta new">신규</span>`;
-  if (item.delta == null || item.delta === 0) return `<span class="delta"></span>`;
-  const up = item.delta > 0;
-  return `<span class="delta ${up?'up':'down'}">${up?'▲':'▼'}${Math.abs(item.delta)}</span>`;
-}
-
 function renderRow(item, key){
   const tag  = item.url ? 'a' : 'div';
   const attr = item.url ? `href="${esc(item.url)}" target="_blank" rel="noopener noreferrer"` : '';
-  const before = (prevRank[key]||{})[item.title];
-  const moved = before !== undefined && before !== item.rank ? ' moved' : '';
   const thumb = item.image
     ? `<img class="thumb" src="${esc(item.image)}" alt="" loading="lazy" onerror="this.remove()">` : '';
-  return `<li><${tag} class="entry${moved}" ${attr}>
+  return `<li><${tag} class="entry" ${attr}>
     <span class="rank${item.rank<=3?' top':''}">${item.rank}</span>
-    ${deltaCell(item)}
     ${thumb}
     <span class="body">
       <span class="title" title="${esc(item.title)}">${esc(item.title)}</span>
@@ -304,22 +279,28 @@ function renderRow(item, key){
 function renderCompact(item, key){
   const tag  = item.url ? 'a' : 'div';
   const attr = item.url ? `href="${esc(item.url)}" target="_blank" rel="noopener noreferrer"` : '';
-  const before = (prevRank[key]||{})[item.title];
-  const moved = before !== undefined && before !== item.rank ? ' moved' : '';
-  return `<li><${tag} class="centry${moved}" ${attr}>
+  return `<li><${tag} class="centry" ${attr}>
     <span class="crank">${item.rank}</span>
     <span class="ctitle" title="${esc(item.title)}">${esc(item.title)}</span>
-    ${deltaCell(item)}
   </${tag}></li>`;
 }
 
 function renderPanel(src){
-  const groups = [...new Set(src.items.map(i => i.group).filter(Boolean))];
+  /* 정적 배포에는 일간/주간/월간이 모두 들어 있다.
+     서버가 없어도 버튼만 눌러 바꿔 볼 수 있게, 여기서 골라 쓴다. */
+  let view = src;
+  const canPick = src.periods && (!staticMode || src.periodItems);
+  const picked = staticPeriod[src.key] || src.period || 'date';
+  if (staticMode && src.periodItems && src.periodItems[picked]) {
+    view = { ...src, ...src.periodItems[picked] };
+  }
+
+  const groups = [...new Set(view.items.map(i => i.group).filter(Boolean))];
   const spread = SPREAD_GROUPS.has(src.key) && groups.length > 1;
   if (groups.length && !spread && !groups.includes(activeTab[src.key])) activeTab[src.key] = groups[0];
   const shown = (groups.length && !spread)
-    ? src.items.filter(i => i.group === activeTab[src.key])
-    : src.items;
+    ? view.items.filter(i => i.group === activeTab[src.key])
+    : view.items;
 
   let sub = '';
   if (src.blocked) {
@@ -329,13 +310,13 @@ function renderPanel(src){
   } else if (src.running) {
     sub = `<span class="collecting"><span class="pulse"></span>수집 중입니다.</span>`
         + (src.fetchedAt ? ` 직전 완료 ${clock(src.fetchedAt)}` : '');
-  } else if (src.error) {
-    sub = `<span class="warn">${esc(src.error)}</span> 마지막 완료 ${clock(src.fetchedAt)}`;
+  } else if (view.error) {
+    sub = `<span class="warn">${esc(view.error)}</span> 마지막 완료 ${clock(src.fetchedAt)}`;
   } else if (!src.fetchedAt) {
     sub = '아직 첫 수집을 하지 않았습니다.';
   } else {
-    sub = `${clock(src.fetchedAt)} 수집 완료${src.note ? '. '+esc(src.note) : ''}`
-        + (src.warning ? ` <span class="soft-warn">${esc(src.warning)}</span>` : '');
+    sub = `${clock(src.fetchedAt)} 수집 완료${view.note ? '. '+esc(view.note) : ''}`
+        + (view.warning ? ` <span class="soft-warn">${esc(view.warning)}</span>` : '');
   }
 
   let inner;
@@ -343,7 +324,7 @@ function renderPanel(src){
     inner = `<div class="groups">${groups.map(g => `
       <section class="group">
         <h3>${esc(g)}</h3>
-        <ul>${src.items.filter(i => i.group === g).map(i => renderCompact(i, src.key)).join('')}</ul>
+        <ul>${view.items.filter(i => i.group === g).map(i => renderCompact(i, src.key)).join('')}</ul>
       </section>`).join('')}</div>`;
   } else if (shown.length){
     inner = `<ul class="list">${shown.map(i => renderRow(i, src.key)).join('')}</ul>`;
@@ -369,10 +350,10 @@ function renderPanel(src){
         `<button data-key="${src.key}" data-tab="${esc(g)}" aria-pressed="${g===activeTab[src.key]}">${esc(g)}</button>`
       ).join('')}</div>` : '';
 
-  const periodPicker = (src.periods && !staticMode)
+  const periodPicker = canPick
     ? `<div class="seg mini" role="group" aria-label="집계 기간">${
         Object.entries(src.periods).map(([value, name]) =>
-          `<button data-period="${value}" data-pkey="${src.key}" aria-pressed="${value===src.period}">${esc(name)}</button>`
+          `<button data-period="${value}" data-pkey="${src.key}" aria-pressed="${value===picked}">${esc(name)}</button>`
         ).join('')}</div>`
     : '';
 
@@ -380,7 +361,6 @@ function renderPanel(src){
     <div class="panel-head">
       <div class="row1">
         <h2><a href="${esc(src.sourceUrl)}" target="_blank" rel="noopener noreferrer">${esc(src.label)}</a></h2>
-        ${staticMode ? '' : `<button class="iconbtn" data-refresh="${src.key}" ${src.enabled?'':'disabled'}>다시 받기</button>`}
       </div>
       ${periodPicker}
       <div class="sub">${sub}</div>
@@ -458,10 +438,6 @@ async function loadOnce(){
     .join('');
   board.querySelectorAll('.list, .groups').forEach((el,i) => el.scrollTop = scroll[i] ?? 0);
 
-  data.sources.forEach(s => {
-    if (s.items.length) prevRank[s.key] = Object.fromEntries(s.items.map(i => [i.title, i.rank]));
-  });
-
   runningCount = data.sources.filter(s => s.running).length;
   const done = data.sources.map(s => s.fetchedAt).filter(Boolean).sort().pop();
   if (done) lastDoneAt = done;
@@ -483,7 +459,11 @@ async function loadOnce(){
 
   const blocked = data.sources.filter(s => s.blocked).length;
   const bad  = data.sources.filter(s => s.enabled && s.error && !s.blocked).length;
-  const total = data.sources.reduce((a,s)=>a+s.items.length,0);
+  const total = data.sources.reduce((a, s) => {
+    const p = staticPeriod[s.key];
+    const v = (staticMode && s.periodItems && p && s.periodItems[p]) ? s.periodItems[p] : s;
+    return a + v.items.length;
+  }, 0);
 
   const status = document.getElementById('status');
   if (runningCount){
@@ -547,6 +527,11 @@ document.getElementById('board').addEventListener('click', async e => {
     if (period.getAttribute('aria-pressed') === 'true') return;
     period.closest('.seg').querySelectorAll('button')
       .forEach(b => b.setAttribute('aria-pressed', b === period));
+    if (staticMode){
+      staticPeriod[period.dataset.pkey] = period.dataset.period;
+      await load();            // 이미 받아둔 자료라 곧바로 바뀐다
+      return;
+    }
     await fetch('/api/period/' + period.dataset.pkey, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -556,12 +541,6 @@ document.getElementById('board').addEventListener('click', async e => {
     return;
   }
 
-  const btn = e.target.closest('[data-refresh]');
-  if (btn){
-    btn.disabled = true; btn.textContent = '받는 중';
-    await fetch('/api/refresh/' + btn.dataset.refresh, {method:'POST'}).catch(()=>{});
-    await load();
-  }
 });
 
 load();
