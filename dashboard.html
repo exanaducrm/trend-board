@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>인기 보드</title>
+<link rel="stylesheet" as="style" crossorigin
+      href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<style>
+:root{
+  --ground:#E4E7E1;
+  --panel:#FCFCFA;
+  --ink:#161D18;
+  --muted:#6E766C;
+  --hairline:#C7CDC4;
+  --up:#C43B2E;
+  --down:#2E63A6;
+  --new:#7A5C1F;
+  --stale:#9AA396;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--ground);
+  color:var(--ink);
+  font-family:'Pretendard Variable',Pretendard,-apple-system,BlinkMacSystemFont,
+              'Apple SD Gothic Neo','Malgun Gothic',sans-serif;
+  font-size:14px;
+  line-height:1.45;
+  -webkit-font-smoothing:antialiased;
+  font-variant-numeric:tabular-nums;
+}
+a{color:inherit;text-decoration:none}
+
+/* ---------------- 상단 ---------------- */
+.masthead{
+  position:sticky;top:0;z-index:20;
+  background:var(--ground);
+  border-bottom:1px solid var(--hairline);
+  padding:16px 20px 12px;
+  display:flex;flex-wrap:wrap;align-items:baseline;gap:14px 20px;
+}
+.masthead h1{
+  margin:0;
+  font-size:22px;font-weight:750;letter-spacing:-.03em;
+}
+.masthead .status{
+  font-size:12.5px;color:var(--muted);
+  flex:1 1 260px;
+}
+.masthead .status b{font-weight:600;color:var(--ink)}
+.controls{display:flex;align-items:center;gap:8px}
+.seg{display:flex;border:1px solid var(--hairline);border-radius:2px;overflow:hidden;background:var(--panel)}
+.seg button{
+  appearance:none;border:0;background:transparent;
+  font:inherit;font-size:12.5px;color:var(--muted);
+  padding:5px 11px;cursor:pointer;
+}
+.seg button + button{border-left:1px solid var(--hairline)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--panel);font-weight:600}
+.seg button:focus-visible{outline:2px solid var(--down);outline-offset:-2px}
+.countdown{font-size:12px;color:var(--muted);min-width:92px;text-align:right}
+.countdown.busy{color:var(--up);font-weight:600}
+.collecting{color:var(--up);font-weight:600}
+.pulse{
+  display:inline-block;width:6px;height:6px;margin-right:5px;
+  border-radius:50%;background:currentColor;vertical-align:middle;
+  animation:pulse 1.1s ease-in-out infinite;
+}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.pulse{animation:none}}
+.primary{
+  appearance:none;border:1px solid var(--ink);background:var(--ink);color:var(--panel);
+  font:inherit;font-size:12.5px;font-weight:600;border-radius:2px;
+  padding:5px 12px;cursor:pointer;
+}
+.primary:hover{background:#2A342C;border-color:#2A342C}
+.primary:disabled{background:var(--stale);border-color:var(--stale);cursor:default}
+.primary:focus-visible{outline:2px solid var(--down);outline-offset:2px}
+
+/* ---------------- 그리드 ---------------- */
+.board{
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+  padding:16px 20px 40px;
+}
+.row{display:grid;gap:14px;align-items:start;min-width:0}
+.row.cols-1{grid-template-columns:minmax(0,1fr)}
+.row.cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.row.cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.row.cols-4{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media (max-width:1250px){
+  .row.cols-4{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:1100px){
+  .row.cols-3{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:760px){
+  .row.cols-2,.row.cols-3,.row.cols-4{grid-template-columns:1fr}
+}
+.panel{
+  min-width:0;
+  background:var(--panel);
+  border:1px solid var(--hairline);
+  border-top:3px solid var(--accent,var(--ink));
+  border-radius:2px;
+  display:flex;flex-direction:column;
+  max-height:min(72vh,760px);
+}
+.panel-head{padding:11px 13px 9px;border-bottom:1px solid var(--hairline)}
+.panel-head .row1{display:flex;align-items:flex-start;gap:8px}
+.panel-head h2{
+  margin:0;font-size:14.5px;font-weight:650;letter-spacing:-.02em;flex:1;
+}
+.panel-head .cycle{font-size:11.5px;color:var(--muted);white-space:nowrap;padding-top:2px}
+.panel-head .sub{margin-top:3px;font-size:11.5px;color:var(--muted)}
+.panel-head .sub .warn{color:var(--up)}
+.panel-head .sub .soft-warn{color:var(--new)}
+.iconbtn{
+  appearance:none;border:1px solid var(--hairline);background:transparent;
+  border-radius:2px;font:inherit;font-size:11.5px;color:var(--muted);
+  padding:2px 7px;cursor:pointer;white-space:nowrap;
+}
+.iconbtn:hover{color:var(--ink);border-color:var(--muted)}
+.iconbtn:disabled{opacity:.4;cursor:default}
+
+.seg.mini{margin-top:8px;width:fit-content}
+.seg.mini button{padding:3px 10px;font-size:11.5px}
+
+.panel.spread{max-height:min(78vh,860px)}
+.groups{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(168px,1fr));
+  min-width:0;
+  gap:4px 14px;
+  padding:10px 13px 12px;
+  overflow-y:auto;
+  flex:1;
+}
+/* 한 줄을 통째로 쓰는 패널은 분야를 가로로 죽 늘어놓는다 */
+.row.cols-1 .panel.spread{max-height:none}
+.row.cols-1 .groups{
+  grid-template-columns:repeat(auto-fit,minmax(96px,1fr));
+  gap:0 8px;
+  overflow:visible;
+}
+.group h3{
+  margin:6px 0 6px;font-size:11.5px;font-weight:600;letter-spacing:-.02em;
+  text-align:center;padding:3px 6px;
+  border:1px solid var(--hairline);border-radius:11px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.group{min-width:0}
+.group ul{margin:0;padding:0;list-style:none}
+.centry{display:flex;gap:6px;align-items:baseline;padding:2px 2px;border-radius:2px}
+.centry:hover{background:#F2F4EF}
+a.centry:focus-visible{outline:2px solid var(--down);outline-offset:-2px}
+.crank{width:14px;flex:none;text-align:right;font-size:11px;font-weight:650;color:var(--muted)}
+.ctitle{
+  flex:1;min-width:0;font-size:11.5px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.row.cols-1 .centry{padding:2.5px 3px}
+a.centry:hover .ctitle{text-decoration:underline;text-decoration-color:var(--muted)}
+.centry .delta{width:auto;min-width:26px;font-size:10.5px;text-align:right}
+
+.tabs{display:flex;gap:5px;overflow-x:auto;padding:8px 13px;border-bottom:1px solid var(--hairline);scrollbar-width:thin}
+.tabs button{
+  appearance:none;border:1px solid var(--hairline);background:transparent;
+  border-radius:11px;font:inherit;font-size:11.5px;color:var(--muted);
+  padding:2px 9px;cursor:pointer;white-space:nowrap;
+}
+.tabs button[aria-pressed="true"]{background:var(--ink);color:var(--panel);border-color:var(--ink)}
+
+.list{margin:0;padding:0;list-style:none;overflow-y:auto;flex:1}
+.list li{border-bottom:1px solid #EDEFEA}
+.list li:last-child{border-bottom:0}
+.entry{display:flex;gap:9px;align-items:center;padding:7px 13px}
+.entry:hover{background:#F2F4EF}
+a.entry:focus-visible{outline:2px solid var(--down);outline-offset:-2px}
+.rank{
+  width:22px;text-align:right;flex:none;
+  font-size:13px;font-weight:650;color:var(--muted);
+}
+.rank.top{color:var(--ink)}
+.delta{width:34px;flex:none;font-size:11px;font-weight:600;color:var(--muted)}
+.delta.up{color:var(--up)}
+.delta.down{color:var(--down)}
+.delta.new{color:var(--new)}
+.thumb{width:30px;height:30px;flex:none;object-fit:cover;border-radius:2px;background:#EDEFEA}
+.body{flex:1;min-width:0}
+.title{
+  display:block;font-size:13px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+a.entry .title{text-decoration:underline;text-decoration-color:transparent;transition:text-decoration-color .12s}
+a.entry:hover .title{text-decoration-color:var(--muted)}
+.price{font-size:12px;color:var(--muted);font-weight:600}
+.moved{animation:flash 1.6s ease-out}
+@keyframes flash{from{background:#FBF1CF}to{background:transparent}}
+
+.empty{padding:22px 14px;color:var(--muted);font-size:12.5px;line-height:1.6}
+.empty code{background:#EDEFEA;padding:1px 4px;border-radius:2px;font-size:11.5px}
+.empty a.outlink{color:var(--down);text-decoration:underline}
+.panel.blocked{opacity:.72}
+.panel.blocked .panel-head{background:#F4F1EC}
+
+@media (prefers-reduced-motion:reduce){.moved{animation:none}}
+@media (max-width:520px){
+  .board{padding:12px}
+  .masthead{padding:12px 14px 10px}
+}
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <h1>인기 보드</h1>
+  <div class="status" id="status">불러오는 중</div>
+  <div class="controls">
+    <span class="countdown" id="countdown"></span>
+  </div>
+</header>
+
+<main class="board" id="board"></main>
+
+<script>
+const DASHBOARD_BUILD = "2026-09-01.43";
+
+const ACCENT = {
+  naver_datalab_keyword:'#03C75A',
+  naver_section:'#03C75A',
+  snx_best:'#03C75A',
+  elevenst_best:'#FF0038',
+  auction_best:'#E8442A',
+};
+
+/* 카테고리를 탭으로 넘기지 않고 한 화면에 모두 펼칠 소스 */
+const SPREAD_GROUPS = new Set(['naver_datalab_keyword', 'naver_section']);
+
+/* 줄 배치. 데이터랩 두 소스가 각각 한 줄을 통째로 쓰고,
+   맨 아랫줄에 쇼핑몰 셋이 놓인다.
+   여기 없는 소스가 생기면 맨 아래 줄에 이어 붙는다. */
+const LAYOUT = [
+  ['naver_datalab_keyword'],
+  ['naver_section'],
+  ['snx_best', 'elevenst_best', 'auction_best'],
+];
+
+let timer = null;
+let ticker = null;
+let lightPoll = null;
+let nextDueAt = null;          // 서버가 알려준 다음 수집 예정 시각
+let nextDueLabel = '';         // 그게 어느 소스인지
+let runningCount = 0;          // 서버가 지금 수집 중인 소스 수
+let staticMode = false;        // 서버 없이 snapshot.json 만 읽는 배포인지
+let loading = false;           // 지금 불러오는 중인지 (겹쳐 도는 것을 막는다)
+let everFailed = false;        // 한 번이라도 실패했는지
+let lastDoneAt = null;         // 마지막으로 수집이 끝난 시각
+let activeTab = {};              // key -> 선택된 카테고리
+const prevRank = {};             // key -> {title: rank}  (변동 하이라이트용)
+
+const esc = s => String(s ?? '').replace(/[&<>"]/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const won = n => n == null ? '' : n.toLocaleString('ko-KR') + '원';
+const clock = iso => iso ? new Date(iso).toLocaleTimeString('ko-KR',{hour12:false}) : '—';
+
+function cycleText(sec){
+  if (sec >= 3600) return `${Math.round(sec/3600)}시간마다 수집`;
+  if (sec >= 60)   return `${Math.round(sec/60)}분마다 수집`;
+  return `${sec}초마다 수집`;
+}
+
+const clockHM = iso => iso
+  ? new Date(iso).toLocaleTimeString('ko-KR', {hour12:false, hour:'2-digit', minute:'2-digit'})
+  : '';
+
+function deltaCell(item){
+  if (item.isNew) return `<span class="delta new">신규</span>`;
+  if (item.delta == null || item.delta === 0) return `<span class="delta"></span>`;
+  const up = item.delta > 0;
+  return `<span class="delta ${up?'up':'down'}">${up?'▲':'▼'}${Math.abs(item.delta)}</span>`;
+}
+
+function renderRow(item, key){
+  const tag  = item.url ? 'a' : 'div';
+  const attr = item.url ? `href="${esc(item.url)}" target="_blank" rel="noopener noreferrer"` : '';
+  const before = (prevRank[key]||{})[item.title];
+  const moved = before !== undefined && before !== item.rank ? ' moved' : '';
+  const thumb = item.image
+    ? `<img class="thumb" src="${esc(item.image)}" alt="" loading="lazy" onerror="this.remove()">` : '';
+  return `<li><${tag} class="entry${moved}" ${attr}>
+    <span class="rank${item.rank<=3?' top':''}">${item.rank}</span>
+    ${deltaCell(item)}
+    ${thumb}
+    <span class="body">
+      <span class="title" title="${esc(item.title)}">${esc(item.title)}</span>
+      ${item.price ? `<span class="price">${won(item.price)}</span>` : ''}
+    </span>
+  </${tag}></li>`;
+}
+
+function renderCompact(item, key){
+  const tag  = item.url ? 'a' : 'div';
+  const attr = item.url ? `href="${esc(item.url)}" target="_blank" rel="noopener noreferrer"` : '';
+  const before = (prevRank[key]||{})[item.title];
+  const moved = before !== undefined && before !== item.rank ? ' moved' : '';
+  return `<li><${tag} class="centry${moved}" ${attr}>
+    <span class="crank">${item.rank}</span>
+    <span class="ctitle" title="${esc(item.title)}">${esc(item.title)}</span>
+    ${deltaCell(item)}
+  </${tag}></li>`;
+}
+
+function renderPanel(src){
+  const groups = [...new Set(src.items.map(i => i.group).filter(Boolean))];
+  const spread = SPREAD_GROUPS.has(src.key) && groups.length > 1;
+  if (groups.length && !spread && !groups.includes(activeTab[src.key])) activeTab[src.key] = groups[0];
+  const shown = (groups.length && !spread)
+    ? src.items.filter(i => i.group === activeTab[src.key])
+    : src.items;
+
+  let sub = '';
+  if (src.blocked) {
+    sub = `<span class="warn">${esc(src.error||'자동 수집이 차단되었습니다.')}</span> 자동 재시도를 멈췄습니다.`;
+  } else if (!src.enabled) {
+    sub = `<span class="warn">설정이 남아 있습니다.</span> ${esc(src.note||'')}`;
+  } else if (src.running) {
+    sub = `<span class="collecting"><span class="pulse"></span>수집 중입니다.</span>`
+        + (src.fetchedAt ? ` 직전 완료 ${clock(src.fetchedAt)}` : '');
+  } else if (src.error) {
+    sub = `<span class="warn">${esc(src.error)}</span> 마지막 완료 ${clock(src.fetchedAt)}`;
+  } else if (!src.fetchedAt) {
+    sub = '아직 첫 수집을 하지 않았습니다.';
+  } else {
+    sub = `${clock(src.fetchedAt)} 수집 완료${src.note ? '. '+esc(src.note) : ''}`
+        + (src.warning ? ` <span class="soft-warn">${esc(src.warning)}</span>` : '');
+  }
+
+  let inner;
+  if (spread && shown.length){
+    inner = `<div class="groups">${groups.map(g => `
+      <section class="group">
+        <h3>${esc(g)}</h3>
+        <ul>${src.items.filter(i => i.group === g).map(i => renderCompact(i, src.key)).join('')}</ul>
+      </section>`).join('')}</div>`;
+  } else if (shown.length){
+    inner = `<ul class="list">${shown.map(i => renderRow(i, src.key)).join('')}</ul>`;
+  } else if (src.blocked){
+    inner = `<div class="empty">이 사이트는 자동 수집을 차단하고 있습니다.
+      더 두드려도 열리지 않으니 자동 재시도를 멈췄습니다.
+      <a class="outlink" href="${esc(src.sourceUrl)}" target="_blank" rel="noopener noreferrer">사이트에서 직접 보기</a></div>`;
+  } else if (src.running){
+    inner = `<div class="empty">받아오는 중입니다. 끝나는 대로 여기에 표시됩니다.</div>`;
+  } else if (!src.enabled){
+    inner = `<div class="empty">이 사이트는 목록을 자바스크립트로 그려서 주소만으로는 읽히지 않습니다.
+      브라우저 개발자도구의 네트워크 탭에서 순위를 실어오는 요청을 찾아
+      <code>collectors.py</code>의 <code>${src.key}</code> 설정을 채우면 바로 붙습니다.</div>`;
+  } else if (src.error){
+    inner = `<div class="empty">항목을 하나도 뽑지 못했습니다.
+      <code>check.bat</code> 을 실행하면 이 페이지에 어떤 링크가 들어 있는지 확인할 수 있습니다.</div>`;
+  } else {
+    inner = `<div class="empty">첫 수집을 기다리는 중입니다.</div>`;
+  }
+
+  const tabs = (groups.length && !spread)
+    ? `<div class="tabs">${groups.map(g =>
+        `<button data-key="${src.key}" data-tab="${esc(g)}" aria-pressed="${g===activeTab[src.key]}">${esc(g)}</button>`
+      ).join('')}</div>` : '';
+
+  const periodPicker = (src.periods && !staticMode)
+    ? `<div class="seg mini" role="group" aria-label="집계 기간">${
+        Object.entries(src.periods).map(([value, name]) =>
+          `<button data-period="${value}" data-pkey="${src.key}" aria-pressed="${value===src.period}">${esc(name)}</button>`
+        ).join('')}</div>`
+    : '';
+
+  return `<section class="panel${src.blocked?' blocked':''}${spread?' spread':''}" style="--accent:${ACCENT[src.key]||'#161D18'}">
+    <div class="panel-head">
+      <div class="row1">
+        <h2><a href="${esc(src.sourceUrl)}" target="_blank" rel="noopener noreferrer">${esc(src.label)}</a></h2>
+        ${staticMode ? '' : `<button class="iconbtn" data-refresh="${src.key}" ${src.enabled?'':'disabled'}>다시 받기</button>`}
+      </div>
+      ${periodPicker}
+      <div class="sub">${sub}</div>
+      <div class="sub">${cycleText(src.interval)}${
+        src.enabled && src.nextDue && !src.running && !staticMode
+          ? `. 다음 ${clockHM(src.nextDue)}` : ''
+      }</div>
+    </div>
+    ${tabs}
+    ${inner}
+  </section>`;
+}
+
+async function load(){
+  if (loading) return;         // 5초 갱신이 겹쳐 돌면 안내 문구를 덮어쓴다
+  loading = true;
+  try { await loadOnce(); } finally { loading = false; }
+}
+
+async function loadOnce(){
+  /* 서버가 있으면 서버에서, 없으면 같은 폴더의 snapshot.json 에서 읽는다.
+     깃허브 페이지처럼 파이썬을 돌릴 수 없는 곳에서도 그대로 뜨게 하기 위한 것. */
+  let data;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      if (!staticMode) {
+        data = await (await fetch('/api/snapshot')).json();
+        break;
+      }
+      throw new Error('static');
+    } catch {
+      try {
+        const res = await fetch('snapshot.json', {cache: 'no-store'});
+        if (!res.ok) throw new Error('no snapshot');
+        data = await res.json();
+        staticMode = true;
+        break;
+      } catch {}
+      if (attempt >= 2) {
+        /* 파일을 브라우저로 직접 열면(file://) 크롬이 같은 폴더의 파일도 못 읽게 막는다.
+           증상이 서버가 없을 때와 똑같이 보이므로 구분해서 알려준다. */
+        everFailed = true;
+        const el = document.getElementById('status');
+        if (location.protocol === 'file:') {
+          el.innerHTML =
+            '<b>파일을 직접 열면 자료를 읽을 수 없습니다.</b> ' +
+            '브라우저가 막습니다. <code>run.bat</code> 을 실행한 뒤 ' +
+            '<code>http://127.0.0.1:8787</code> 로 들어와 주세요.';
+        } else {
+          el.innerHTML =
+            '<b>자료를 불러오지 못했습니다.</b> 검은 창에서 <code>python server.py</code> 가 ' +
+            '떠 있는지, 같은 폴더에 <code>snapshot.json</code> 이 있는지 확인해 주세요.';
+        }
+        return;
+      }
+      if (!everFailed) document.getElementById('status').textContent = '기다리는 중';
+      await new Promise(r => setTimeout(r, 1200));
+    }
+  }
+  if (data.static) staticMode = true;
+  everFailed = false;
+
+  const board = document.getElementById('board');
+  const scroll = {};
+  board.querySelectorAll('.list, .groups').forEach((el,i) => scroll[i] = el.scrollTop);
+
+  const byKey = Object.fromEntries(data.sources.map(s => [s.key, s]));
+  const rows = LAYOUT.map(keys => keys.map(k => byKey[k]).filter(Boolean));
+  const leftover = data.sources.filter(s => !LAYOUT.some(keys => keys.includes(s.key)));
+  if (leftover.length) rows.push(leftover);
+
+  board.innerHTML = rows
+    .filter(row => row.length)
+    .map(row => `<div class="row cols-${row.length}">${row.map(renderPanel).join('')}</div>`)
+    .join('');
+  board.querySelectorAll('.list, .groups').forEach((el,i) => el.scrollTop = scroll[i] ?? 0);
+
+  data.sources.forEach(s => {
+    if (s.items.length) prevRank[s.key] = Object.fromEntries(s.items.map(i => [i.title, i.rank]));
+  });
+
+  runningCount = data.sources.filter(s => s.running).length;
+  const done = data.sources.map(s => s.fetchedAt).filter(Boolean).sort().pop();
+  if (done) lastDoneAt = done;
+  const dues = data.sources
+    .filter(s => s.enabled && s.nextDue)
+    .map(s => ({ at: new Date(s.nextDue).getTime(), label: s.label }))
+    .filter(x => !isNaN(x.at))
+    .sort((a, b) => a.at - b.at);
+  nextDueAt = dues.length ? dues[0].at : null;
+  nextDueLabel = dues.length ? dues[0].label : '';
+  paintCountdown();
+  const live = data.sources.filter(s => s.items.length).length;
+  if (!staticMode && data.build && data.build !== DASHBOARD_BUILD){
+    document.getElementById('status').innerHTML =
+      `<b>파일 버전이 다릅니다.</b> 화면은 ${DASHBOARD_BUILD}, 서버는 ${data.build}입니다. ` +
+      `서버가 읽는 파일은 <code>${esc(data.dashboardPath || '')}</code> 입니다. 이 경로의 파일을 바꿔 주세요.`;
+    return;
+  }
+
+  const blocked = data.sources.filter(s => s.blocked).length;
+  const bad  = data.sources.filter(s => s.enabled && s.error && !s.blocked).length;
+  const total = data.sources.reduce((a,s)=>a+s.items.length,0);
+
+  const status = document.getElementById('status');
+  if (runningCount){
+    const names = data.sources.filter(s => s.running).map(s => s.label);
+    status.innerHTML =
+      `<span class="collecting"><span class="pulse"></span><b>수집 중</b></span> ` +
+      `${runningCount}개 소스 (${esc(names.join(', '))})` +
+      (lastDoneAt ? `. 직전 완료 ${clock(lastDoneAt)}` : '');
+  } else {
+    status.innerHTML =
+      `<b>${live}/${data.sources.length}개 소스</b>에서 ${total}건` +
+      (blocked ? `, ${blocked}개 차단됨` : '') +
+      (bad ? `, ${bad}개 소스에 오류` : '') +
+      (lastDoneAt ? `. 마지막 수집 완료 ${clock(lastDoneAt)}` : '');
+  }
+  document.title = `인기 보드 (${DASHBOARD_BUILD})`;
+}
+
+function paintCountdown(){
+  const el = document.getElementById('countdown');
+  if (runningCount){
+    el.className = 'countdown busy';
+    el.innerHTML = `<span class="pulse"></span>수집 중`;
+    return;
+  }
+  el.className = 'countdown';
+  if (staticMode){
+    el.textContent = lastDoneAt ? `${clock(lastDoneAt)} 수집` : '';
+    return;
+  }
+  if (!nextDueAt){ el.textContent = ''; return; }
+  const left = Math.max(0, Math.round((nextDueAt - Date.now()) / 1000));
+  const where = nextDueLabel ? ` (${nextDueLabel})` : '';
+  if (left > 3600){
+    el.textContent = `다음 수집까지 ${Math.floor(left / 3600)}시간 ${Math.floor(left % 3600 / 60)}분${where}`;
+    return;
+  }
+  const m = String(Math.floor(left / 60)).padStart(2, '0');
+  const sec = String(left % 60).padStart(2, '0');
+  el.textContent = `다음 수집까지 ${m}:${sec}${where}`;
+}
+
+/* 화면 다시 그리기와 재수집은 다른 일이다.
+   서버 캐시를 읽는 건 같은 컴퓨터 안이라 사실상 공짜라서, 5초마다 확인해
+   수집이 끝나는 즉시 화면에 뜨게 한다. 쇼핑몰을 두드리는 주기와는 무관하다. */
+const LIGHT_POLL_MS = 5000;
+
+function startLightPoll(){
+  if (lightPoll) clearInterval(lightPoll);
+  lightPoll = setInterval(load, LIGHT_POLL_MS);
+  if (ticker) clearInterval(ticker);
+  ticker = setInterval(paintCountdown, 1000);
+}
+
+document.getElementById('board').addEventListener('click', async e => {
+  const tab = e.target.closest('[data-tab]');
+  if (tab){ activeTab[tab.dataset.key] = tab.dataset.tab; load(); return; }
+
+  const period = e.target.closest('[data-period]');
+  if (period){
+    if (period.getAttribute('aria-pressed') === 'true') return;
+    period.closest('.seg').querySelectorAll('button')
+      .forEach(b => b.setAttribute('aria-pressed', b === period));
+    await fetch('/api/period/' + period.dataset.pkey, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({period: period.dataset.period}),
+    }).catch(()=>{});
+    await load();   // 서버가 곧바로 수집 중으로 바꿔 주므로 그 상태가 바로 보인다
+    return;
+  }
+
+  const btn = e.target.closest('[data-refresh]');
+  if (btn){
+    btn.disabled = true; btn.textContent = '받는 중';
+    await fetch('/api/refresh/' + btn.dataset.refresh, {method:'POST'}).catch(()=>{});
+    await load();
+  }
+});
+
+load();
+startLightPoll();
+</script>
+</body>
+</html>

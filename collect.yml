@@ -1,0 +1,52 @@
+name: 인기 보드 수집과 배포
+
+on:
+  schedule:
+    # 15분마다. 깃허브 사정에 따라 몇 분 늦게 돌 수 있습니다.
+    - cron: "*/15 * * * *"
+  workflow_dispatch:        # 저장소 Actions 탭에서 직접 실행
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 패키지 설치
+        run: pip install -r requirements.txt
+
+      - name: 수집해서 JSON 만들기
+        run: python server.py --export snapshot.json
+
+      - name: 배포할 파일 모으기
+        run: |
+          mkdir -p site
+          cp dashboard.html site/index.html
+          cp snapshot.json site/
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
