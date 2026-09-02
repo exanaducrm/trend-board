@@ -2,7 +2,7 @@ name: 인기 보드 수집과 배포
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "*/20 * * * *"
   workflow_dispatch:
 
 permissions:
