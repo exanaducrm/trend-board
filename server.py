@@ -594,6 +594,10 @@ async def preview_source(key: str) -> None:
     print(f"\n{target.label}")
     print(f"{target.source_url}\n")
 
+    shape = getattr(target, "price_api_shape", None)
+    if shape:
+        print(f"가격 주소  {shape} 형식으로 받았습니다\n")
+
     paths = getattr(target, "picked_paths", None)
     if paths:
         print("고른 배열")

@@ -27,7 +27,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 # 파일이 섞였는지 눈으로 확인하기 위한 표시. 세 파일의 값이 같아야 한다.
-BUILD = "2026-09-01.64"
+BUILD = "2026-09-01.67"
 
 KST = timezone(timedelta(hours=9))
 
@@ -358,6 +358,78 @@ class JsonApiCollector(Collector):
         return items
 
 
+def to_int_price(value: Any) -> int | None:
+    """'56,970' 도 56970.0000 도 정수로 바꾼다."""
+    try:
+        return int(round(float(str(value).replace(",", "").strip())))
+    except (TypeError, ValueError):
+        return None
+
+
+def unwrap_asmx(data: Any) -> Any:
+    """ASP.NET 웹서비스는 결과를 d 안에 문자열로 넣어 보내는 일이 있다."""
+    if isinstance(data, dict) and "d" in data and len(data) == 1:
+        inner = data["d"]
+        if isinstance(inner, str):
+            with contextlib.suppress(json.JSONDecodeError, ValueError):
+                return json.loads(inner)
+        return inner
+    return data
+
+
+def find_price_map(data: Any, ids: set[str]) -> dict[str, int]:
+    """
+    응답 어디에 있든 '상품번호 -> 가격' 짝을 찾아낸다.
+    응답 구조를 모르므로, 우리가 가진 상품번호와 맞는 값이 든 객체를 훑는다.
+    """
+    found: dict[str, int] = {}
+
+    def walk(node: Any, depth: int = 0) -> None:
+        if depth > 8 or len(found) >= len(ids):
+            return
+        if isinstance(node, list):
+            for child in node:
+                walk(child, depth + 1)
+            return
+        if not isinstance(node, dict):
+            return
+
+        item_id = None
+        for value in node.values():
+            if isinstance(value, (str, int)) and str(value).strip() in ids:
+                item_id = str(value).strip()
+                break
+        if item_id:
+            price = None
+            for key, value in node.items():
+                if str(value).strip() == item_id:
+                    continue
+                if any(w in key.lower() for w in ("price", "amt", "amount", "cost")):
+                    candidate = to_int_price(value)
+                    if candidate and candidate > 0:
+                        price = candidate
+                        break
+            if price:
+                found[item_id] = price
+        for value in node.values():
+            walk(value, depth + 1)
+
+    walk(data)
+    return found
+
+
+# 요청 형식. 첫 줄이 옥션에서 실제로 쓰는 모양이고, 나머지는 대비책이다.
+PRICE_API_SHAPES: list[tuple[str, str, str]] = [
+    ("POST", "json_list", "itemNos"),
+    ("POST", "json", "itemNos"),
+    ("POST", "json", "itemNoList"),
+    ("POST", "form", "itemNos"),
+    ("GET", "query", "itemNos"),
+]
+# 한 번에 보낼 상품 개수
+PRICE_API_CHUNK = 40
+
+
 class LinkHarvestCollector(Collector):
     """
     서버가 HTML로 목록을 내려주는 페이지용. 상품 상세 링크 패턴으로 순위를 복원한다.
@@ -380,6 +452,7 @@ class LinkHarvestCollector(Collector):
         min_title_len: int = 3,
         charset: str | None = None,
         warmup_url: str | None = None,
+        price_api: str | None = None,
         enabled: bool = True,
         note: str | None = None,
         extra_headers: dict | None = None,
@@ -396,6 +469,8 @@ class LinkHarvestCollector(Collector):
         self.min_title_len = min_title_len
         self.charset = charset
         self.warmup_url = warmup_url
+        # 가격을 따로 받아오는 주소. 옥션의 쿠폰 적용가가 이런 경우다.
+        self.price_api = price_api
         self.enabled, self.note = enabled, note
         self.extra_headers = extra_headers or {}
 
@@ -404,11 +479,20 @@ class LinkHarvestCollector(Collector):
         "[class*=goods], [class*=prd], [class*=product], [class*=item_t], strong, h3, h4"
     )
 
-    @staticmethod
-    def _clean(text: str | None) -> str | None:
+    # 제목 뒤에 딸려 오는 가격이나 배송 문구를 자를 자리
+    TAIL_RE = re.compile(
+        r"(쿠폰적용가|무료배송|[0-9]{1,3}(?:,[0-9]{3})+\s*원|[0-9]{1,3}\s*%)"
+    )
+
+    @classmethod
+    def _clean(cls, text: str | None) -> str | None:
         if not text:
             return None
         t = re.sub(r"\s+", " ", text).strip()
+        # 링크가 카드 전체를 감싸면 제목 뒤에 가격까지 들어온다. 거기서 끊는다.
+        m = cls.TAIL_RE.search(t)
+        if m and m.start() > 0:
+            t = t[: m.start()].strip(" -·,")
         return t or None
 
     @classmethod
@@ -442,6 +526,30 @@ class LinkHarvestCollector(Collector):
                     return t
         return None
 
+    # 취소선이 그어진 원가가 들어 있는 자리
+    STRIKE_TAGS = ("del", "s", "strike")
+    STRIKE_WORDS = ("origin", "before", "through", "strike", "old", "list_price", "del")
+
+    @classmethod
+    def _is_struck(cls, tag) -> bool:
+        node = tag
+        for _ in range(4):
+            if node is None or getattr(node, "name", None) is None:
+                return False
+            if node.name in cls.STRIKE_TAGS:
+                return True
+            classes = " ".join(node.get("class") or []).lower()
+            if any(w in classes for w in cls.STRIKE_WORDS):
+                return True
+            node = node.parent
+        return False
+
+    @classmethod
+    def _text_alive(cls, node) -> str:
+        """취소선 친 글자는 빼고 읽는다. 원가를 가격으로 착각하지 않기 위해서다."""
+        parts = [t for t in node.find_all(string=True) if not cls._is_struck(t.parent)]
+        return re.sub(r"\s+", " ", " ".join(parts)).strip()
+
     PRICE_SELECTOR = (
         "[class*=price], [class*=Price], [class*=sale], [class*=Sale], "
         "[class*=cost], [class*=amount], [class*=won], strong"
@@ -461,23 +569,16 @@ class LinkHarvestCollector(Collector):
             if node is None or getattr(node, "name", None) is None:
                 break
 
-            # 1) 쿠폰이 적힌 자리를 먼저 본다
-            for tag in node.find_all(True, recursive=True):
-                text = tag.get_text(" ", strip=True)
-                if "쿠폰" not in text or len(text) > 40:
-                    continue
-                price = parse_price(text) or parse_bare_number(text)
-                if price:
-                    return price, "쿠폰적용가"
-
-            # 2) 가격 전용 요소
+            # 가격 전용 요소부터 본다. 취소선 친 원가는 건너뛴다.
             for tag in node.select(cls.PRICE_SELECTOR):
-                text = tag.get_text(" ", strip=True)
+                if cls._is_struck(tag):
+                    continue
+                text = cls._text_alive(tag)
                 price = parse_price(text) or parse_bare_number(text)
                 if price:
                     return price, None
 
-            price = parse_price(node.get_text(" ", strip=True))
+            price = parse_price(cls._text_alive(node))
             if price:
                 return price, None
             node = node.parent
@@ -516,7 +617,87 @@ class LinkHarvestCollector(Collector):
         parts = [f"{shape}({count}회)" for shape, count in shapes.most_common(top)]
         return "가장 많은 링크 형태: " + ", ".join(parts)
 
+    async def _price_api_call(
+        self, client: httpx.AsyncClient, headers: dict, shape: tuple[str, str, str], ids: list[str]
+    ) -> dict[str, int]:
+        method, kind, field = shape
+        joined = ",".join(ids)
+        if kind == "json_list":
+            resp = await client.request(
+                method, self.price_api,
+                headers={**headers, "Content-Type": "application/json; charset=UTF-8"},
+                json={"currentInputChannel": "", field: ids},
+            )
+        elif kind == "json":
+            resp = await client.request(
+                method, self.price_api,
+                headers={**headers, "Content-Type": "application/json; charset=UTF-8"},
+                json={field: joined},
+            )
+        elif kind == "form":
+            resp = await client.request(method, self.price_api, headers=headers, data={field: joined})
+        else:
+            resp = await client.request(method, self.price_api, headers=headers, params={field: joined})
+        resp.raise_for_status()
+        return find_price_map(unwrap_asmx(resp.json()), set(ids))
+
+    async def _apply_price_api(self, client: httpx.AsyncClient, items: list[Item]) -> None:
+        """
+        가격을 따로 내려주는 주소가 있으면 불러서 덮어쓴다.
+        옥션의 쿠폰 적용가가 이런 경우다. 상품이 많으면 나눠 보낸다.
+        """
+        by_id: dict[str, Item] = {}
+        for item in items:
+            m = self.id_re.search(item.url or "")
+            if m:
+                by_id[m.group(1)] = item
+        if not by_id:
+            return
+
+        ids = list(by_id)
+        headers = {
+            **BROWSER_HEADERS,
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "X-Requested-With": "XMLHttpRequest",
+            "Referer": self.source_url,
+        }
+
+        chunks = [ids[i : i + PRICE_API_CHUNK] for i in range(0, len(ids), PRICE_API_CHUNK)]
+        shape = None
+        tried: list[str] = []
+        got: dict[str, int] = {}
+
+        for chunk in chunks:
+            # 한 번 통한 형식은 다음 묶음에도 그대로 쓴다
+            order = [shape] if shape else PRICE_API_SHAPES
+            for candidate in order:
+                try:
+                    prices = await self._price_api_call(client, headers, candidate, chunk)
+                except Exception as exc:  # noqa: BLE001
+                    if shape is None:
+                        tried.append(f"{candidate[0]}/{candidate[1]}({exc.__class__.__name__})")
+                    continue
+                if prices:
+                    got.update(prices)
+                    shape = candidate
+                    break
+                if shape is None:
+                    tried.append(f"{candidate[0]}/{candidate[1]}(짝을 못 찾음)")
+
+        if not got:
+            self.warning = (
+                "쿠폰 적용가를 받지 못해 페이지에 적힌 금액을 씁니다. " + ", ".join(tried[:2])
+            )
+            return
+
+        for item_id, price in got.items():
+            by_id[item_id].price = price
+        self.price_api_shape = f"{shape[0]}/{shape[1]}/{shape[2]}"
+        if len(got) < len(ids):
+            self.warning = f"쿠폰 적용가를 {len(got)}/{len(ids)}개만 받았습니다."
+
     async def fetch(self, client: httpx.AsyncClient) -> list[Item]:
+        self.price_api_shape = None
         headers = {**BROWSER_HEADERS, **self.extra_headers}
         # 첫 방문처럼 메인 페이지를 먼저 열어 세션 쿠키를 받는다.
         # 목록 페이지를 곧바로 두드리면 막는 곳이 있어서 넣어 둔 절차다.
@@ -566,6 +747,9 @@ class LinkHarvestCollector(Collector):
             )
             if len(items) >= self.limit:
                 break
+
+        if items and self.price_api:
+            await self._apply_price_api(client, items)
 
         if items and not any(i.price for i in items):
             self.warning = "가격을 읽지 못했습니다. 페이지 구조가 바뀌었을 수 있습니다."
@@ -1668,6 +1852,7 @@ def build_collectors() -> list[Collector]:
             link_base="https://itempage3.auction.co.kr/",
             charset="euc-kr",
             warmup_url="https://www.auction.co.kr/",
+            price_api="https://corners.auction.co.kr/Best/BestWebService.asmx/GetCouponAppliedPrice",
             interval=1200,
             limit=PRODUCT_LIMIT,
         ),
