@@ -212,7 +212,7 @@ a.entry:hover .title{text-decoration-color:var(--muted)}
 <main class="board" id="board"></main>
 
 <script>
-const DASHBOARD_BUILD = "2026-09-01.53";
+const DASHBOARD_BUILD = "2026-09-01.55";
 
 const ACCENT = {
   naver_datalab_keyword:'#03C75A',
@@ -239,6 +239,8 @@ let ticker = null;
 let lightPoll = null;
 let nextDueAt = null;          // 서버가 알려준 다음 수집 예정 시각
 let nextDueLabel = '';         // 그게 어느 소스인지
+let staticNextDue = null;      // 정적 배포에서 계산한 다음 예정 시각(ISO)
+let staticEverySec = 0;        // 정적 배포에서 파일이 다시 만들어지는 주기
 let runningCount = 0;          // 서버가 지금 수집 중인 소스 수
 let staticMode = false;        // 서버 없이 snapshot.json 만 읽는 배포인지
 let loading = false;           // 지금 불러오는 중인지 (겹쳐 도는 것을 막는다)
@@ -385,9 +387,11 @@ function renderPanel(src){
       </div>
       ${periodPicker}
       <div class="sub">${sub}</div>
-      <div class="sub">${cycleText(src.interval)}${
-        src.enabled && src.nextDue && !src.running && !staticMode
-          ? `. 다음 수집까지 <span class="due" data-due="${esc(src.nextDue)}"></span>` : ''
+      <div class="sub">${cycleText(staticMode && staticEverySec ? staticEverySec : src.interval)}${
+        (() => {
+          const due = staticMode ? staticNextDue : (src.enabled && !src.running ? src.nextDue : null);
+          return due ? `. 다음 수집까지 <span class="due" data-due="${esc(due)}"></span>` : '';
+        })()
       }</div>
     </div>
     ${tabs}
@@ -444,6 +448,15 @@ async function loadOnce(){
   if (data.static) staticMode = true;
   everFailed = false;
 
+  /* 정적 배포에는 서버가 없다. 언제 다시 만들어지는지만 알면
+     마지막 수집 시각에 그 주기를 더해 다음 예정 시각을 셀 수 있다. */
+  staticEverySec = Number(data.everySec) || 0;
+  staticNextDue = null;
+  if (staticMode && staticEverySec && data.serverTime){
+    const at = new Date(data.serverTime).getTime();
+    if (!isNaN(at)) staticNextDue = new Date(at + staticEverySec * 1000).toISOString();
+  }
+
   const board = document.getElementById('board');
   const scroll = {};
   board.querySelectorAll('.list, .groups').forEach((el,i) => scroll[i] = el.scrollTop);
@@ -463,13 +476,18 @@ async function loadOnce(){
   runningCount = data.sources.filter(s => s.running).length;
   const done = data.sources.map(s => s.fetchedAt).filter(Boolean).sort().pop();
   if (done) lastDoneAt = done;
-  const dues = data.sources
-    .filter(s => s.enabled && s.nextDue)
-    .map(s => ({ at: new Date(s.nextDue).getTime(), label: s.label }))
-    .filter(x => !isNaN(x.at))
-    .sort((a, b) => a.at - b.at);
-  nextDueAt = dues.length ? dues[0].at : null;
-  nextDueLabel = dues.length ? dues[0].label : '';
+  if (staticMode){
+    nextDueAt = staticNextDue ? new Date(staticNextDue).getTime() : null;
+    nextDueLabel = '';
+  } else {
+    const dues = data.sources
+      .filter(s => s.enabled && s.nextDue)
+      .map(s => ({ at: new Date(s.nextDue).getTime(), label: s.label }))
+      .filter(x => !isNaN(x.at))
+      .sort((a, b) => a.at - b.at);
+    nextDueAt = dues.length ? dues[0].at : null;
+    nextDueLabel = dues.length ? dues[0].label : '';
+  }
   paintCountdown();
   const live = data.sources.filter(s => s.items.length).length;
   if (!staticMode && data.build && data.build !== DASHBOARD_BUILD){
@@ -512,14 +530,14 @@ function paintCountdown(){
     return;
   }
   el.className = 'countdown';
-  if (staticMode){
-    el.textContent = lastDoneAt ? `${clock(lastDoneAt)} 수집` : '';
+  if (!nextDueAt){
+    el.textContent = staticMode && lastDoneAt ? `${clock(lastDoneAt)} 수집` : '';
     return;
   }
-  if (!nextDueAt){ el.textContent = ''; return; }
   const left = Math.max(0, Math.round((nextDueAt - Date.now()) / 1000));
   const where = nextDueLabel ? ` (${nextDueLabel})` : '';
-  el.textContent = `다음 수집까지 ${remainText(left)}${where}`;
+  const about = staticMode ? ' 예정' : '';
+  el.textContent = `다음 수집까지 ${remainText(left)}${where}${about}`;
 }
 
 /* 화면 다시 그리기와 재수집은 다른 일이다.

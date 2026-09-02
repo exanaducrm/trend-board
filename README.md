@@ -120,7 +120,8 @@ https://datalab.naver.com/shoppingInsight/getKeywordRank.naver?timeUnit=date&cid
 
 네이버 데이터랩 두 패널에는 **일간 / 주간 / 월간** 버튼이 붙어 있습니다.
 누르면 그 자리에서 다시 수집합니다.
-서버를 껐다 켜면 항상 **일간**으로 돌아옵니다. 고른 값은 저장하지 않습니다.
+서버를 껐다 켜면 항상 **주간**으로 돌아옵니다. 고른 값은 저장하지 않습니다.
+기본값은 `collectors.py` 의 `DEFAULT_PERIOD` 로 바꿉니다.
 
 주간은 최근 7일, 월간은 최근 30일 구간을 한 번에 요청합니다.
 

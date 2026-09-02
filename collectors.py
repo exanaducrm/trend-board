@@ -27,7 +27,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 # 파일이 섞였는지 눈으로 확인하기 위한 표시. 세 파일의 값이 같아야 한다.
-BUILD = "2026-09-01.53"
+BUILD = "2026-09-01.55"
 
 KST = timezone(timedelta(hours=9))
 
@@ -38,6 +38,8 @@ PRODUCT_LIMIT = 100
 
 # 데이터랩이 쓰는 집계 단위. 화면에서 고를 수 있게 소스에 붙인다.
 PERIODS = {"date": "일간", "week": "주간", "month": "월간"}
+# 처음 열었을 때 선택되어 있을 기간
+DEFAULT_PERIOD = "week"
 
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -1087,7 +1089,7 @@ class RankedListCollector(Collector):
         title_key: str | None = None,
         link_template: str | None = None,
         post_data: dict | None = None,
-        period: str = "date",
+        period: str = DEFAULT_PERIOD,
         cid: str | None = None,
         api_candidates: Iterable[str] | None = None,
         cids: Iterable[tuple[str, str]] | None = None,
@@ -1103,7 +1105,7 @@ class RankedListCollector(Collector):
         self.list_path, self.title_key = list_path, title_key
         self.link_template = link_template
         self.post_data = post_data
-        self.period = period if period in PERIODS else "date"
+        self.period = period if period in PERIODS else DEFAULT_PERIOD
         self.cid = cid
         # 확인되지 않은 API 후보. 되면 쓰고, 안 되면 페이지 HTML로 물러선다.
         self.api_candidates = list(api_candidates) if api_candidates else []
@@ -1362,11 +1364,11 @@ class NaverDatalabKeyword(Collector):
         self,
         cids: Iterable[tuple[str, str]] | None = None,
         per_category: int = 10,
-        period: str = "date",
+        period: str = DEFAULT_PERIOD,
     ):
         self.cids = list(cids) if cids else NAVER_CIDS
         self.per_category = per_category
-        self.period = period if period in PERIODS else "date"
+        self.period = period if period in PERIODS else DEFAULT_PERIOD
         self.base_note = self.note
         self.picked_paths: list[str] = []
 

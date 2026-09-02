@@ -29,6 +29,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
 from collectors import (
     BUILD,
+    DEFAULT_PERIOD,
     PERIODS,
     Collector,
     Item,
@@ -500,13 +501,15 @@ async def from_curl(path: str) -> None:
     print(f"({best_len}개짜리 배열을 골랐습니다. 다른 배열이 맞으면 list_path 를 바꾸세요.)\n")
 
 
-async def export_snapshot(path: str) -> None:
+async def export_snapshot(path: str, every_sec: int = 1200) -> None:
     """
     켜져 있는 소스를 수집해 결과를 JSON 파일로 저장한다.
     깃허브 액션처럼 서버를 띄울 수 없는 곳에서 화면에 쓸 자료를 만들기 위한 것.
 
     기간을 고를 수 있는 소스는 일간/주간/월간을 모두 받아 함께 담는다.
     서버가 없어도 화면에서 버튼만 눌러 바꿔 볼 수 있게 하기 위해서다.
+
+    every_sec 은 이 파일을 다시 만드는 주기다. 화면이 다음 예정 시각을 셀 때 쓴다.
     """
     for c in COLLECTORS:
         CACHE[c.key] = _placeholder(c)
@@ -525,8 +528,9 @@ async def export_snapshot(path: str) -> None:
                 *(refresh_one(c, client) for c in plain_sources), return_exceptions=True
             )
 
-        # 마지막에 일간이 남도록 역순으로 돈다. 화면 기본값이 일간이어야 한다.
-        for period in ("month", "week", "date"):
+        # 기본 기간을 마지막에 돌린다. 화면이 처음 열릴 때 그 기간이 보여야 한다.
+        order = [p for p in PERIODS if p != DEFAULT_PERIOD] + [DEFAULT_PERIOD]
+        for period in order:
             if not period_sources:
                 break
             for c in period_sources:
@@ -548,6 +552,7 @@ async def export_snapshot(path: str) -> None:
 
     data = build_snapshot()
     data["static"] = True          # 화면이 정적 배포임을 알아채는 표시
+    data["everySec"] = every_sec   # 다음 예정 시각을 셀 때 쓴다
     data.pop("dashboardPath", None)
     for src in data["sources"]:
         if src["key"] in per_period:
@@ -728,6 +733,8 @@ if __name__ == "__main__":
     parser.add_argument("--preview", help="해당 소스를 한 번 수집해 결과 목록을 그대로 출력하고 종료")
     parser.add_argument("--export", metavar="파일",
                         help="한 번 수집해 JSON 으로 저장하고 종료 (정적 배포용)")
+    parser.add_argument("--every", type=int, default=1200, metavar="초",
+                        help="정적 배포에서 이 파일을 다시 만드는 주기 (기본 1200초)")
     parser.add_argument("--from-curl", dest="from_curl", metavar="파일",
                         help="개발자도구에서 복사한 cURL 을 읽어 수집기 설정을 만들어 줍니다")
     parser.add_argument("--demo", action="store_true", help="네트워크 없이 예시 데이터로 화면만 확인")
@@ -739,7 +746,7 @@ if __name__ == "__main__":
         print("저장된 목록을 지웠습니다.")
 
     if args.export:
-        asyncio.run(export_snapshot(args.export))
+        asyncio.run(export_snapshot(args.export, args.every))
     elif args.preview:
         asyncio.run(preview_source(args.preview))
     elif args.from_curl:
