@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>인기 보드</title>
+<title>쇼핑 트렌드</title>
 <link rel="stylesheet" as="style" crossorigin
       href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <style>
@@ -201,7 +201,7 @@ a.entry:hover .title{text-decoration-color:var(--muted)}
 <body>
 
 <header class="masthead">
-  <h1>인기 보드</h1>
+  <h1>쇼핑 트렌드</h1>
   <div class="status" id="status">불러오는 중</div>
   <div class="controls">
     <span class="countdown" id="countdown"></span>
@@ -211,7 +211,7 @@ a.entry:hover .title{text-decoration-color:var(--muted)}
 <main class="board" id="board"></main>
 
 <script>
-const DASHBOARD_BUILD = "2026-09-01.49";
+const DASHBOARD_BUILD = "2026-09-01.51";
 
 const ACCENT = {
   naver_datalab_keyword:'#03C75A',
@@ -479,7 +479,7 @@ async function loadOnce(){
       (bad ? `, ${bad}개 소스에 오류` : '') +
       (lastDoneAt ? `. 마지막 수집 완료 ${clock(lastDoneAt)}` : '');
   }
-  document.title = `인기 보드 (${DASHBOARD_BUILD})`;
+  document.title = `쇼핑 트렌드 (${DASHBOARD_BUILD})`;
 }
 
 function paintCountdown(){

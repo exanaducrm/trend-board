@@ -2,7 +2,7 @@
 chcp 65001 > nul
 cd /d "%~dp0"
 setlocal enabledelayedexpansion
-title 인기 보드 미리보기
+title 쇼핑 트렌드 미리보기
 
 echo.
 echo   예시 데이터로 화면만 띄웁니다. 쇼핑몰에 접속하지 않습니다.

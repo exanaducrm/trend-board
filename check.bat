@@ -2,7 +2,7 @@
 chcp 65001 > nul
 cd /d "%~dp0"
 setlocal enabledelayedexpansion
-title 인기 보드 점검
+title 쇼핑 트렌드 점검
 
 if "%~1"=="" (set "TARGET=snx_best") else (set "TARGET=%~1")
 

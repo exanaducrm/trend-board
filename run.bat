@@ -2,10 +2,10 @@
 chcp 65001 > nul
 cd /d "%~dp0"
 setlocal enabledelayedexpansion
-title 인기 보드
+title 쇼핑 트렌드
 
 echo.
-echo   인기 보드를 시작합니다.
+echo   쇼핑 트렌드를 시작합니다.
 echo.
 
 rem ---------------------------------------------------------------- 파일 확인

@@ -2,7 +2,7 @@
 chcp 65001 > nul
 cd /d "%~dp0"
 setlocal enabledelayedexpansion
-title 인기 보드 - 정적 배포 미리보기
+title 쇼핑 트렌드 - 정적 배포 미리보기
 
 echo.
 echo   깃허브 페이지에 올렸을 때의 모습을 미리 봅니다.

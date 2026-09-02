@@ -27,7 +27,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 # 파일이 섞였는지 눈으로 확인하기 위한 표시. 세 파일의 값이 같아야 한다.
-BUILD = "2026-09-01.49"
+BUILD = "2026-09-01.51"
 
 KST = timezone(timedelta(hours=9))
 

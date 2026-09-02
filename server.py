@@ -235,7 +235,7 @@ async def lifespan(app: FastAPI):
             await task
 
 
-app = FastAPI(title="인기검색어·인기상품 통합 보드", lifespan=lifespan)
+app = FastAPI(title="쇼핑 트렌드", lifespan=lifespan)
 
 
 DASHBOARD = BASE_DIR / "dashboard.html"
@@ -753,7 +753,7 @@ if __name__ == "__main__":
 
         if args.demo:
             DEMO.append(True)
-        print(f"\n  인기 보드  빌드 {BUILD}")
+        print(f"\n  쇼핑 트렌드  빌드 {BUILD}")
         print(f"  보드 주소  http://{args.host}:{args.port}\n")
         # uvicorn 은 포트 오류를 자기가 삼켜서 조용히 끝난다. 미리 확인해 알려준다.
         import socket

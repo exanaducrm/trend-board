@@ -2,7 +2,7 @@
 chcp 65001 > nul
 cd /d "%~dp0"
 setlocal enabledelayedexpansion
-title 인기 보드 (사내망 공유)
+title 쇼핑 트렌드 (사내망 공유)
 
 echo.
 echo   같은 네트워크에 있는 다른 PC에서도 볼 수 있게 띄웁니다.

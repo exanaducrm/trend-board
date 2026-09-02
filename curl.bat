@@ -2,7 +2,7 @@
 chcp 65001 > nul
 cd /d "%~dp0"
 setlocal enabledelayedexpansion
-title 인기 보드 - cURL 설정 만들기
+title 쇼핑 트렌드 - cURL 설정 만들기
 
 if not exist "curl.txt" (
   echo.
