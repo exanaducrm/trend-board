@@ -211,7 +211,7 @@ a.entry:hover .title{text-decoration-color:var(--muted)}
 <main class="board" id="board"></main>
 
 <script>
-const DASHBOARD_BUILD = "2026-09-01.57";
+const DASHBOARD_BUILD = "2026-09-01.58";
 
 const ACCENT = {
   naver_datalab_keyword:'#03C75A',
@@ -374,7 +374,7 @@ function renderPanel(src){
       </div>
       ${periodPicker}
       <div class="sub">${sub}</div>
-      <div class="sub">${cycleText(staticMode && staticEverySec ? staticEverySec : src.interval)}</div>
+      <div class="sub">${cycleText(src.interval)}</div>
     </div>
     ${tabs}
     ${inner}
@@ -514,7 +514,9 @@ function paintCountdown(){
     return;
   }
   const left = Math.max(0, Math.round((nextDueAt - Date.now()) / 1000));
-  el.textContent = `다음 수집까지 ${remainText(left)}${staticMode ? ' 예정' : ''}`;
+  el.textContent = staticMode
+    ? `다음 갱신까지 ${remainText(left)} 예정`
+    : `다음 수집까지 ${remainText(left)}`;
 }
 
 /* 화면 다시 그리기와 재수집은 다른 일이다.
