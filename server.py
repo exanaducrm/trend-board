@@ -351,8 +351,8 @@ def load_demo() -> None:
             for _cid, name in cats
         ],
         "snx_best": [(None, [f"네이버쇼핑 인기상품 {i}" for i in range(1, 101)])],
-        "elevenst_best": [(None, [f"11번가 베스트 {i}" for i in range(1, 101)])],
-        "auction_best": [(None, [f"옥션 베스트 {i}" for i in range(1, 101)])],
+        "elevenst_best": [(None, [f"11번가 BEST {i}" for i in range(1, 101)])],
+        "auction_best": [(None, [f"옥션 BEST {i}" for i in range(1, 101)])],
     }
     for c in COLLECTORS:
         rows = samples.get(c.key)

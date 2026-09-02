@@ -4,7 +4,7 @@
 설계 원칙
 ---------
 1) 사이트마다 갱신 주기가 다르다. 네이버 데이터랩 쇼핑인사이트는 하루 단위로 집계되고,
-   G마켓/옥션 베스트는 보통 수십 분 단위로 바뀐다. 그래서 수집기마다 interval(초)을 따로 둔다.
+   G마켓/옥션 BEST는 보통 수십 분 단위로 바뀐다. 그래서 수집기마다 interval(초)을 따로 둔다.
    화면 자동 갱신(30초)은 "로컬 서버의 캐시"를 다시 그리는 것이고,
    외부 사이트를 실제로 다시 긁는 주기는 여기 interval이 결정한다.
 2) 엔드포인트가 바뀌어도 코드를 갈아엎지 않도록, 범용 수집기 두 개
@@ -27,7 +27,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 # 파일이 섞였는지 눈으로 확인하기 위한 표시. 세 파일의 값이 같아야 한다.
-BUILD = "2026-09-01.58"
+BUILD = "2026-09-01.61"
 
 KST = timezone(timedelta(hours=9))
 
@@ -561,6 +561,30 @@ URL_KEYS = (
 )
 
 
+def row_rank(row: dict) -> int | None:
+    """행에 붙은 순위 번호를 꺼낸다. rankInfo.rank 처럼 한 겹 안에 있는 경우도 본다."""
+    value = row.get("rankInfo")
+    if isinstance(value, dict):
+        value = value.get("rank")
+    if value is None:
+        value = row.get("rank")
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def is_advertisement(row: dict) -> bool:
+    """광고 상품인지 본다. 11번가 '도전!베스트'처럼 순위와 무관한 자리가 있다."""
+    for key in ("adYn", "isAd", "adYN"):
+        value = row.get(key)
+        if isinstance(value, str) and value.strip().upper() in {"Y", "TRUE"}:
+            return True
+        if value is True:
+            return True
+    return False
+
+
 def _first_key(row: dict, candidates: Iterable[str]) -> str | None:
     lowered = {k.lower(): k for k in row}
     for c in candidates:
@@ -718,6 +742,35 @@ def collect_product_rows(
         return []
 
     candidates = find_object_lists(data)
+
+    # 순위 번호가 붙은 행이 있으면 그것만 쓴다.
+    # 광고 블록에는 순위가 없으므로 이 단계에서 자연스럽게 걸러진다.
+    ranked: list[tuple[int, dict]] = []
+    seen_rank: set[str] = set()
+    for path, _length, _keys in candidates:
+        with contextlib.suppress(Exception):
+            rows = dig(data, path)
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if not isinstance(row, dict) or is_advertisement(row):
+                    continue
+                rank = row_rank(row)
+                if rank is None:
+                    continue
+                if not _first_key(row, TITLE_KEYS):
+                    continue
+                marker = f"{rank}"
+                if marker in seen_rank:
+                    continue
+                seen_rank.add(marker)
+                ranked.append((rank, row))
+    if len(ranked) >= 5:
+        ranked.sort(key=lambda pair: pair[0])
+        if report is not None:
+            report.append(f"순위가 붙은 행 {len(ranked)}개")
+        return [row for _rank, row in ranked][:limit]
+
     for threshold in (4, 3, 2):
         picked: list[dict] = []
         seen: set[str] = set()
@@ -731,7 +784,7 @@ def collect_product_rows(
                 if report is not None and rows:
                     report.append(f"{path} ({len(rows)}개, 점수 {score_product_keys(keys)})")
                 for row in rows:
-                    if not isinstance(row, dict):
+                    if not isinstance(row, dict) or is_advertisement(row):
                         continue
                     if dedupe:
                         marker = str(
@@ -774,14 +827,11 @@ def rows_to_items(rows: list[dict], *, url_template: str | None, title_key: str 
         if pkey and row.get(pkey) is not None:
             with contextlib.suppress(ValueError, TypeError):
                 price = int(str(row[pkey]).replace(",", ""))
+        image = row.get(gkey) if gkey else None
+        if isinstance(image, str) and image.startswith("//"):
+            image = "https:" + image
         items.append(
-            Item(
-                rank=len(items) + 1,
-                title=title,
-                url=url,
-                price=price,
-                image=row.get(gkey) if gkey else None,
-            )
+            Item(rank=len(items) + 1, title=title, url=url, price=price, image=image)
         )
     return items
 
@@ -1513,11 +1563,11 @@ def build_collectors() -> list[Collector]:
             note="분야마다 상위 10개",
         ),
 
-        # ---- 3. 네이버쇼핑 가장 많이 본 BEST
+        # ---- 3. 네이버쇼핑 많이 구매한 BEST
         # 페이지 HTML에 심긴 데이터를 꺼내 쓴다. 목록 배열은 스스로 찾는다.
         EmbeddedJsonCollector(
             key="snx_best",
-            label="네이버쇼핑 가장 많이 본 BEST",
+            label="네이버쇼핑 많이 구매한 BEST",
             source_url=(
                 "https://snxbest.naver.com/product/best/buy"
                 "?ageType=ALL&categoryId=A&sortType=PRODUCT_BUY&periodType=DAILY"
@@ -1529,11 +1579,11 @@ def build_collectors() -> list[Collector]:
             note="일간 구매 기준 전체 카테고리",
         ),
 
-        # ---- 4. 11번가 베스트
+        # ---- 4. 11번가 BEST
         # 페이지는 빈 껍데기라 목록 API를 직접 부른다. 응답 구조는 자동으로 찾는다.
         AutoJsonCollector(
             key="elevenst_best",
-            label="11번가 베스트",
+            label="11번가 BEST",
             source_url="https://www.11st.co.kr/page/best",
             api_url=[
                 "https://apis.11st.co.kr/pui/v2/page?pageId=PCBEST",
@@ -1547,10 +1597,10 @@ def build_collectors() -> list[Collector]:
             note="전체 베스트 상위 100개",
         ),
 
-        # ---- 5. 옥션 베스트 (링크 패턴 기반, 검증 필요)
+        # ---- 5. 옥션 BEST (링크 패턴 기반, 검증 필요)
         LinkHarvestCollector(
             key="auction_best",
-            label="옥션 베스트",
+            label="옥션 BEST",
             source_url="http://corners.auction.co.kr/corner/CategoryBest.aspx",
             id_pattern=r"[Ii]tem[Nn]o=([A-Za-z0-9]+)",
             base_url="http://corners.auction.co.kr/",
