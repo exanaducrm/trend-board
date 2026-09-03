@@ -27,7 +27,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 # 파일이 섞였는지 눈으로 확인하기 위한 표시. 세 파일의 값이 같아야 한다.
-BUILD = "2026-09-01.75"
+BUILD = "2026-09-01.76"
 
 KST = timezone(timedelta(hours=9))
 
@@ -479,25 +479,36 @@ class LinkHarvestCollector(Collector):
         "[class*=goods], [class*=prd], [class*=product], [class*=item_t], strong, h3, h4"
     )
 
-    # 제목 뒤에 딸려 오는 가격이나 배송 문구를 자를 자리
-    @staticmethod
-    def _min_title() -> int:
-        return 3
-
-    TAIL_RE = re.compile(
-        r"(쿠폰적용가|무료배송|[0-9]{1,3}(?:,[0-9]{3})+\s*원|[0-9]{1,3}\s*%)"
-    )
+    # 제목 뒤에 딸려 오는 안내 문구. 여기서 끊는다.
+    TAIL_RE = re.compile(r"(쿠폰적용가|무료배송|오늘출발|내일도착)")
+    # 끝에 붙은 가격만 떼어낸다. 상품명 중간의 숫자는 건드리지 않는다.
+    TRAILING_PRICE_RE = re.compile(r"(?:\s*[0-9]{1,3}(?:,[0-9]{3})+\s*원)+\s*$")
 
     @classmethod
     def _clean(cls, text: str | None) -> str | None:
+        """
+        상품명을 다듬는다.
+
+        링크가 카드 전체를 감싸면 제목 뒤에 가격이나 배송 문구가 딸려 온다.
+        그 부분만 떼어내되, 상품명 안의 퍼센트나 숫자는 그대로 둔다.
+        '25% 라이트 200g' 같은 표기가 상품명의 일부이기 때문이다.
+        """
         if not text:
             return None
         t = re.sub(r"\s+", " ", text).strip()
-        # 링크가 카드 전체를 감싸면 제목 뒤에 가격까지 들어온다. 거기서 끊는다.
+
         m = cls.TAIL_RE.search(t)
         if m and m.start() > 0:
-            t = t[: m.start()].strip(" -·,")
-        return t or None
+            t = t[: m.start()]
+
+        # 끝에 가격이 여러 번 붙는 경우가 있어 없어질 때까지 떼어낸다
+        while True:
+            stripped = cls.TRAILING_PRICE_RE.sub("", t).strip()
+            if stripped == t.strip():
+                break
+            t = stripped
+
+        return t.strip(" -·,") or None
 
     def _title_of(self, anchor) -> str | None:
         """
