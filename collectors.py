@@ -27,7 +27,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 # 파일이 섞였는지 눈으로 확인하기 위한 표시. 세 파일의 값이 같아야 한다.
-BUILD = "2026-09-01.67"
+BUILD = "2026-09-01.75"
 
 KST = timezone(timedelta(hours=9))
 
@@ -480,6 +480,10 @@ class LinkHarvestCollector(Collector):
     )
 
     # 제목 뒤에 딸려 오는 가격이나 배송 문구를 자를 자리
+    @staticmethod
+    def _min_title() -> int:
+        return 3
+
     TAIL_RE = re.compile(
         r"(쿠폰적용가|무료배송|[0-9]{1,3}(?:,[0-9]{3})+\s*원|[0-9]{1,3}\s*%)"
     )
@@ -495,35 +499,54 @@ class LinkHarvestCollector(Collector):
             t = t[: m.start()].strip(" -·,")
         return t or None
 
-    @classmethod
-    def _title_of(cls, anchor) -> str | None:
+    def _title_of(self, anchor) -> str | None:
+        """
+        상품명을 찾는다. 후보를 모아 가장 긴 것을 고른다.
+        먼저 찾은 것을 쓰면 '[스팸]스팸' 같은 짧은 딱지에 걸린다.
+
+        후보는 같은 상품 카드 안에서만 모은다. 위로 올라가다 다른 상품 링크를
+        만나면 거기서 멈춘다. 옆 상품 이름을 끌어오지 않기 위해서다.
+        """
         img = anchor.find("img")
-        for cand in (
+
+        # 제목 자리로 지정된 곳들. 이쪽을 우선한다.
+        named: list[str | None] = [
             anchor.get("title"),
             img.get("alt") if img else None,
             img.get("title") if img else None,
             anchor.get("data-montelena-productname"),
-            anchor.get_text(" ", strip=True),
-        ):
-            t = cls._clean(cand)
-            if t:
-                return t
+        ]
+        plain: list[str | None] = [anchor.get_text(" ", strip=True)]
 
-        # 링크 자체에 글자가 없으면 주변 블록을 위로 훑는다. 이미지 링크가 이런 경우다.
         block = anchor
         for _ in range(3):
             block = block.parent
             if block is None or getattr(block, "name", None) is None:
                 break
-            node = block.select_one(cls.TITLE_SELECTOR)
-            if node:
-                t = cls._clean(node.get_text(" ", strip=True))
-                if t:
-                    return t
+
+            # 이 덩어리가 여러 상품을 담고 있으면 더 올라가지 않는다
+            ids = {
+                m.group(1)
+                for a in block.select("a[href]")
+                if (m := self.id_re.search(a.get("href", "")))
+            }
+            if len(ids) > 1:
+                break
+
+            for node in block.select(self.TITLE_SELECTOR):
+                named.append(node.get("title"))
+                named.append(node.get_text(" ", strip=True))
             for other in block.select("a[href]"):
-                t = cls._clean(other.get("title") or other.get_text(" ", strip=True))
-                if t and len(t) >= 4:
-                    return t
+                named.append(other.get("title"))
+                other_img = other.find("img")
+                if other_img:
+                    named.append(other_img.get("alt"))
+                plain.append(other.get_text(" ", strip=True))
+
+        for pool in (named, plain):
+            cleaned = [t for t in (self._clean(c) for c in pool) if t and 3 <= len(t) <= 150]
+            if cleaned:
+                return max(cleaned, key=len)
         return None
 
     # 취소선이 그어진 원가가 들어 있는 자리
@@ -584,15 +607,48 @@ class LinkHarvestCollector(Collector):
             node = node.parent
         return None, None
 
-    @staticmethod
-    def _image_of(anchor) -> str | None:
-        img = anchor.find("img")
-        if not img:
-            block = anchor.find_parent(["li", "div", "article"])
-            img = block.find("img") if block else None
-        if not img:
+    # 이미지 주소가 들어갈 수 있는 자리. 늦게 불러오는 방식이 여럿이라 다 본다.
+    IMG_ATTRS = (
+        "src", "data-src", "data-original", "data-lazy", "data-lazy-src",
+        "data-original-src", "data-echo", "data-url",
+    )
+
+    @classmethod
+    def _image_of(cls, anchor) -> str | None:
+        def pick(img) -> str | None:
+            for attr in cls.IMG_ATTRS:
+                value = img.get(attr)
+                if value and not value.startswith("data:"):
+                    return value
+            srcset = img.get("srcset")
+            if srcset:
+                return srcset.split(",")[0].strip().split(" ")[0]
             return None
-        src = img.get("src") or img.get("data-src") or img.get("data-original")
+
+        img = anchor.find("img")
+        src = pick(img) if img else None
+
+        if not src:
+            block = anchor
+            for _ in range(3):
+                block = block.parent
+                if block is None or getattr(block, "name", None) is None:
+                    break
+                for candidate in block.find_all("img"):
+                    src = pick(candidate)
+                    if src:
+                        break
+                if src:
+                    break
+                # 배경 이미지로 넣는 경우도 있다
+                for tag in block.find_all(style=True):
+                    m = re.search(r"url\(['\"]?([^'\")]+)", tag["style"])
+                    if m:
+                        src = m.group(1)
+                        break
+                if src:
+                    break
+
         if not src:
             return None
         return "https:" + src if src.startswith("//") else src
@@ -693,8 +749,6 @@ class LinkHarvestCollector(Collector):
         for item_id, price in got.items():
             by_id[item_id].price = price
         self.price_api_shape = f"{shape[0]}/{shape[1]}/{shape[2]}"
-        if len(got) < len(ids):
-            self.warning = f"쿠폰 적용가를 {len(got)}/{len(ids)}개만 받았습니다."
 
     async def fetch(self, client: httpx.AsyncClient) -> list[Item]:
         self.price_api_shape = None
@@ -1244,6 +1298,7 @@ class EmbeddedJsonCollector(Collector):
             raise RuntimeError(
                 f"데이터 덩어리 {len(blobs)}개를 찾았지만 상품 목록으로 보이는 배열이 없습니다. " + hint
             )
+
         return rows_to_items(rows, url_template=self.url_template, title_key=self.title_key)
 
 
@@ -1853,6 +1908,7 @@ def build_collectors() -> list[Collector]:
             charset="euc-kr",
             warmup_url="https://www.auction.co.kr/",
             price_api="https://corners.auction.co.kr/Best/BestWebService.asmx/GetCouponAppliedPrice",
+            note="전체 베스트 상위 100개",
             interval=1200,
             limit=PRODUCT_LIMIT,
         ),

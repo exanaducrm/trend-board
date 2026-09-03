@@ -106,7 +106,6 @@ a{color:inherit;text-decoration:none}
   border-top:3px solid var(--accent,var(--ink));
   border-radius:2px;
   display:flex;flex-direction:column;
-  max-height:min(72vh,760px);
 }
 .panel-head{padding:11px 13px 9px;border-bottom:1px solid var(--hairline)}
 .panel-head .row1{display:flex;align-items:flex-start;gap:8px}
@@ -121,18 +120,16 @@ a{color:inherit;text-decoration:none}
 .seg.mini{margin-top:8px;width:fit-content}
 .seg.mini button{padding:3px 10px;font-size:11.5px}
 
-.panel.spread{max-height:min(78vh,860px)}
+
 .groups{
   display:grid;
   grid-template-columns:repeat(auto-fill,minmax(168px,1fr));
   min-width:0;
   gap:4px 14px;
   padding:10px 13px 12px;
-  overflow-y:auto;
   flex:1;
 }
 /* 한 줄을 통째로 쓰는 패널은 분야를 가로로 죽 늘어놓는다 */
-.row.cols-1 .panel.spread{max-height:none}
 .row.cols-1 .groups{
   grid-template-columns:repeat(auto-fit,minmax(96px,1fr));
   gap:0 8px;
@@ -165,7 +162,7 @@ a.centry:hover .ctitle{text-decoration:underline;text-decoration-color:var(--mut
 }
 .tabs button[aria-pressed="true"]{background:var(--ink);color:var(--panel);border-color:var(--ink)}
 
-.list{margin:0;padding:0;list-style:none;overflow-y:auto;flex:1}
+.list{margin:0;padding:0;list-style:none;flex:1}
 .list li{border-bottom:1px solid #EDEFEA}
 .list li:last-child{border-bottom:0}
 .entry{display:flex;gap:9px;align-items:center;padding:7px 13px}
@@ -211,7 +208,7 @@ a.entry:hover .title{text-decoration-color:var(--muted)}
 <main class="board" id="board"></main>
 
 <script>
-const DASHBOARD_BUILD = "2026-09-01.67";
+const DASHBOARD_BUILD = "2026-09-01.75";
 
 const ACCENT = {
   naver_datalab_keyword:'#03C75A',
@@ -440,9 +437,6 @@ async function loadOnce(){
   }
 
   const board = document.getElementById('board');
-  const scroll = {};
-  board.querySelectorAll('.list, .groups').forEach((el,i) => scroll[i] = el.scrollTop);
-
   const byKey = Object.fromEntries(data.sources.map(s => [s.key, s]));
   const rows = LAYOUT.map(keys => keys.map(k => byKey[k]).filter(Boolean));
   const leftover = data.sources.filter(s => !LAYOUT.some(keys => keys.includes(s.key)));
@@ -452,7 +446,6 @@ async function loadOnce(){
     .filter(row => row.length)
     .map(row => `<div class="row cols-${row.length}">${row.map(renderPanel).join('')}</div>`)
     .join('');
-  board.querySelectorAll('.list, .groups').forEach((el,i) => el.scrollTop = scroll[i] ?? 0);
 
   runningCount = data.sources.filter(s => s.running).length;
   const done = data.sources.map(s => s.fetchedAt).filter(Boolean).sort().pop();
