@@ -617,6 +617,8 @@ async def preview_source(key: str) -> None:
         title = item.title if len(item.title) <= 50 else item.title[:49] + "…"
         price = f"{item.price:,}원" if item.price else "-"
         print(f"{item.rank:<5}{title:<52}{price:>12}")
+        if target.kind == "product":
+            print(f"     이미지 {item.image or '(못 찾음)'}")
     print(f"\n총 {len(result.items)}건")
     if result.items:
         print(f"1위 링크  {result.items[0].url}\n")

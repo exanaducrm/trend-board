@@ -27,7 +27,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 # 파일이 섞였는지 눈으로 확인하기 위한 표시. 세 파일의 값이 같아야 한다.
-BUILD = "2026-09-01.76"
+BUILD = "2026-09-01.77"
 
 KST = timezone(timedelta(hours=9))
 
@@ -618,22 +618,35 @@ class LinkHarvestCollector(Collector):
             node = node.parent
         return None, None
 
+    # 진짜 상품 사진이 아닌 자리표시 이미지. 늦게 불러오는 자리에 끼워 두는 경우가 있다.
+    PLACEHOLDER_WORDS = (
+        "blank", "noimg", "no_image", "noimage", "dummy", "spacer",
+        "loading", "placeholder", "transparent", "1x1",
+    )
+
     # 이미지 주소가 들어갈 수 있는 자리. 늦게 불러오는 방식이 여럿이라 다 본다.
     IMG_ATTRS = (
         "src", "data-src", "data-original", "data-lazy", "data-lazy-src",
         "data-original-src", "data-echo", "data-url",
     )
 
-    @classmethod
-    def _image_of(cls, anchor) -> str | None:
+    def _image_of(self, anchor) -> str | None:
+        def usable(value: str | None) -> bool:
+            if not value or value.startswith("data:"):
+                return False
+            low = value.lower()
+            return not any(w in low for w in self.PLACEHOLDER_WORDS)
+
         def pick(img) -> str | None:
-            for attr in cls.IMG_ATTRS:
-                value = img.get(attr)
-                if value and not value.startswith("data:"):
-                    return value
+            # 자리표시 이미지를 넣어두고 진짜 주소는 다른 자리에 두는 경우가 있다
+            for attr in self.IMG_ATTRS:
+                if usable(img.get(attr)):
+                    return img.get(attr)
             srcset = img.get("srcset")
             if srcset:
-                return srcset.split(",")[0].strip().split(" ")[0]
+                first = srcset.split(",")[0].strip().split(" ")[0]
+                if usable(first):
+                    return first
             return None
 
         img = anchor.find("img")
@@ -645,6 +658,16 @@ class LinkHarvestCollector(Collector):
                 block = block.parent
                 if block is None or getattr(block, "name", None) is None:
                     break
+
+                # 이 덩어리에 다른 상품이 섞여 있으면 멈춘다. 이웃 사진을 끌어오지 않기 위해서다.
+                ids = {
+                    m.group(1)
+                    for a in block.select("a[href]")
+                    if (m := self.id_re.search(a.get("href", "")))
+                }
+                if len(ids) > 1:
+                    break
+
                 for candidate in block.find_all("img"):
                     src = pick(candidate)
                     if src:
@@ -654,7 +677,7 @@ class LinkHarvestCollector(Collector):
                 # 배경 이미지로 넣는 경우도 있다
                 for tag in block.find_all(style=True):
                     m = re.search(r"url\(['\"]?([^'\")]+)", tag["style"])
-                    if m:
+                    if m and usable(m.group(1)):
                         src = m.group(1)
                         break
                 if src:
