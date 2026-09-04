@@ -27,7 +27,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 # 파일이 섞였는지 눈으로 확인하기 위한 표시. 세 파일의 값이 같아야 한다.
-BUILD = "2026-09-01.77"
+BUILD = "2026-09-01.80"
 
 KST = timezone(timedelta(hours=9))
 
@@ -885,6 +885,11 @@ IMAGE_KEYS = (
 URL_KEYS = (
     "productUrl", "linkUrl1", "linkUrl", "mallProductUrl", "detailUrl", "url", "link",
 )
+# 판매자 스토어 주소와 그 안에서 쓰는 상품번호.
+# 네이버쇼핑이 주는 linkUrl 은 /main/products/ 형태라 로그인 화면으로 넘어간다.
+# 스토어 주소에 상품번호를 붙이면 바로 열린다.
+MALL_URL_KEYS = ("mallLinkUrl", "storeUrl", "mallUrl", "shopUrl", "sellerUrl")
+CHANNEL_ID_KEYS = ("chnlProductId", "channelProductId", "originProductId")
 
 
 def row_rank(row: dict) -> int | None:
@@ -1141,13 +1146,20 @@ def rows_to_items(rows: list[dict], *, url_template: str | None, title_key: str 
     pkey = _first_key(sample, PRICE_KEYS)
     gkey = _first_key(sample, IMAGE_KEYS)
     ukey = _first_key(sample, URL_KEYS)
+    mkey = _first_key(sample, MALL_URL_KEYS)
+    chnl_key = _first_key(sample, CHANNEL_ID_KEYS)
 
     items: list[Item] = []
     for row in rows:
         title = str(row.get(tkey) or "").strip()
         if not title:
             continue
-        url = row.get(ukey) if ukey else None
+        url = None
+        # 스토어 주소 + 상품번호가 있으면 그것을 먼저 쓴다
+        if mkey and chnl_key and row.get(mkey) and row.get(chnl_key):
+            url = f"{str(row[mkey]).rstrip('/')}/products/{row[chnl_key]}"
+        if not url and ukey:
+            url = row.get(ukey)
         if not url and url_template and ikey and row.get(ikey) is not None:
             url = url_template.format(id=row[ikey])
         price = None
@@ -1874,6 +1886,13 @@ class NaverDatalabKeyword(Collector):
 # ---------------------------------------------------------------- 소스 목록
 
 
+SNX_PAGE = (
+    "https://snxbest.naver.com/product/best/buy"
+    "?ageType=ALL&categoryId=A&sortType=PRODUCT_BUY&periodType=DAILY"
+)
+SNX_API = "https://snxbest.naver.com/api/v1/snxbest/product"
+
+
 def build_collectors() -> list[Collector]:
     """
     확인된 것은 구현해 두고, 확인이 필요한 것은 껍데기만 두었다.
@@ -1898,19 +1917,34 @@ def build_collectors() -> list[Collector]:
         ),
 
         # ---- 3. 네이버쇼핑 많이 구매한 BEST
-        # 페이지 HTML에 심긴 데이터를 꺼내 쓴다. 목록 배열은 스스로 찾는다.
-        EmbeddedJsonCollector(
+        # 목록 API 를 먼저 부른다. 응답에 상품 링크(linkUrl)가 들어 있어 그대로 쓸 수 있다.
+        # 주소가 바뀌면 페이지 HTML 을 읽는 방식으로 물러선다.
+        ChainCollector(
             key="snx_best",
             label="네이버쇼핑 많이 구매한 BEST",
-            source_url=(
-                "https://snxbest.naver.com/product/best/buy"
-                "?ageType=ALL&categoryId=A&sortType=PRODUCT_BUY&periodType=DAILY"
-            ),
+            source_url=SNX_PAGE,
             kind="product",
-            url_template="https://shopping.naver.com/window-products/catalog/{id}",
             interval=1200,
-            limit=PRODUCT_LIMIT,
             note="일간 구매 기준 전체 카테고리",
+            steps=[
+                AutoJsonCollector(
+                    key="snx_best",
+                    label="네이버쇼핑 많이 구매한 BEST",
+                    source_url=SNX_PAGE,
+                    api_url=[
+                        SNX_API + "/list?catId=A&ageType=ALL&sortType=PRODUCT_BUY&periodType=DAILY",
+                        SNX_API + "/list?categoryId=A&ageType=ALL&type=DIV2"
+                        "&sortType=PRODUCT_BUY&periodType=DAILY",
+                    ],
+                    limit=PRODUCT_LIMIT,
+                ),
+                EmbeddedJsonCollector(
+                    key="snx_best",
+                    label="네이버쇼핑 많이 구매한 BEST",
+                    source_url=SNX_PAGE,
+                    limit=PRODUCT_LIMIT,
+                ),
+            ],
         ),
 
         # ---- 4. 11번가 BEST
