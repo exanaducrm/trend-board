@@ -98,6 +98,22 @@ Settings → Pages 위쪽에 주소가 뜹니다.
 https://사용자이름.github.io/저장소이름/
 ```
 
+### 깃허브에서만 막히는 소스 끄기
+
+깃허브 서버는 데이터센터 IP를 씁니다. 쇼핑몰이 이를 봇으로 보고 막으면
+`ConnectTimeout` 이나 `HTTP 403` 이 계속 납니다. 로컬은 되는데 깃허브만 안 되면 이 경우입니다.
+
+그 소스만 깃허브에서 빼려면 워크플로의 수집 단계에 환경변수를 넣으세요.
+
+```yaml
+      - name: export snapshot
+        env:
+          TREND_BOARD_DISABLE: lotteon_best
+        run: python server.py --export snapshot.json --every 3600
+```
+
+여러 개면 쉼표로 잇습니다. 로컬 실행에는 영향이 없습니다.
+
 ### 주기 바꾸기
 
 `.github/workflows/collect.yml` 의 이 줄을 고칩니다.

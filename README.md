@@ -78,7 +78,7 @@ HTML 파일을 더블클릭하는 방식으로는 만들 수 없습니다.
 | 네이버 데이터랩 인기 검색어 | 6시간 (하루 단위 집계입니다) |
 | 네이버 데이터랩 인기분야 | 6시간 |
 | 네이버쇼핑 BEST | 1시간 |
-| 11번가 BEST | 1시간 |
+| 롯데ON BEST | 1시간 |
 | 옥션 BEST | 1시간 |
 
 주기는 `collectors.py`의 각 소스 `interval` 값(초)으로 조정하세요.
@@ -147,7 +147,7 @@ const SPREAD_GROUPS = new Set(['naver_datalab_keyword', 'naver_section']);
 const LAYOUT = [
   ['naver_datalab_keyword'],
   ['naver_section'],
-  ['snx_best', 'elevenst_best', 'auction_best'],
+  ['snx_best', 'lotteon_best', 'auction_best'],
 ];
 ```
 
@@ -162,7 +162,7 @@ const LAYOUT = [
 | 옥션 BEST | 동작 (상위 100개) |
 | 네이버 데이터랩 인기분야 | 동작 (11개 분야 × 상위 10개) |
 | 네이버쇼핑 BEST | 동작 (상위 100개) |
-| 11번가 BEST | 동작 (상위 100개, 페이지 2개를 이어받음) |
+| 롯데ON BEST | 동작 (상위 100개, 페이지 2개를 이어받음) |
 
 확인이 필요한 소스는 화면에 "설정이 남아 있습니다" 상태로 뜹니다.
 세 곳은 목록을 자바스크립트로 그려서 주소만으로는 빈 껍데기가 옵니다.
@@ -242,7 +242,7 @@ api_url=[
 ## 결과가 사이트와 맞는지 확인하기
 
 ```
-python server.py --preview elevenst_best
+python server.py --preview lotteon_best
 ```
 
 실제로 한 번 수집해서 순위표를 그대로 찍어 줍니다.
@@ -256,6 +256,15 @@ python server.py --preview elevenst_best
 
 순위   상품명                                    가격
 1     롯데호텔월드 디럭스 객실 1박 패키지          250,000원
+```
+
+## 특정 소스 끄기
+
+환경변수로 소스를 뺄 수 있습니다. 코드를 고치지 않고 그 환경에서만 제외됩니다.
+
+```
+set TREND_BOARD_DISABLE=lotteon_best
+python server.py
 ```
 
 ## 잘 안 될 때

@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import contextlib
 import json
 import re
@@ -27,7 +28,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 # 파일이 섞였는지 눈으로 확인하기 위한 표시. 세 파일의 값이 같아야 한다.
-BUILD = "2026-09-01.81"
+BUILD = "2026-09-01.84"
 
 KST = timezone(timedelta(hours=9))
 
@@ -862,10 +863,10 @@ class LinkHarvestCollector(Collector):
 # 상품 목록에서 흔히 쓰이는 키 이름. 앞에 있을수록 우선한다.
 TITLE_KEYS = (
     "productName", "goodsName", "itemName", "prdNm", "prdName",
-    "name", "title", "keyword", "productTitle",
+    "name", "title", "keyword", "productTitle", "spdNm",
 )
 ID_KEYS = (
-    "productId", "productNo", "prdNo", "goodsNo", "nvMid", "itemNo",
+    "productId", "productNo", "prdNo", "spdNo", "goodsNo", "nvMid", "itemNo",
     "catalogId", "id", "no",
 )
 # 쿠폰을 적용한 가격. 있으면 이쪽을 먼저 쓴다.
@@ -874,12 +875,14 @@ COUPON_PRICE_KEYS = (
     "couponDiscountPrice", "cardCouponPrice", "finalCouponPrice",
 )
 PRICE_KEYS = (
+    # dcAplyTotAmt: 롯데온의 할인 적용가
+    "dcAplyTotAmt", "scndFvrPrc",
     "finalDscPrice", "discountedSalePrice", "finalPrice", "finalDiscountPrice",
-    "salePrice", "sellPrice",
+    "salePrice", "sellPrice", "frstFvrPrc", "slPrc",
     "discountPrice", "lastDiscountAmt", "lowestPrice", "price",
 )
 IMAGE_KEYS = (
-    "imageUrl", "productImageUrl", "thumbnailUrl", "imageUrl300", "imgUrl",
+    "imgFullUrl", "imageUrl", "productImageUrl", "thumbnailUrl", "imageUrl300", "imgUrl",
     "image", "thumbnail",
 )
 URL_KEYS = (
@@ -899,6 +902,8 @@ def row_rank(row: dict) -> int | None:
         value = value.get("rank")
     if value is None:
         value = row.get("rank")
+    if value is None:
+        value = row.get("prirRnkg")
     try:
         return int(str(value).strip())
     except (TypeError, ValueError):
@@ -1232,12 +1237,26 @@ class AutoJsonCollector(Collector):
         for page_no, url in enumerate(self.api_urls, start=1):
             if len(rows) >= self.limit:
                 break
-            try:
-                resp = await client.get(url, headers=headers)
-                resp.raise_for_status()
-                last_data = resp.json()
-            except Exception as exc:  # noqa: BLE001
-                failures.append(f"{page_no}쪽({exc.__class__.__name__})")
+
+            # 연결이 안 될 때가 있다. 잠시 쉬었다 다시 시도한다.
+            last_error: Exception | None = None
+            for attempt, wait in enumerate((0, 3, 8)):
+                if wait:
+                    await asyncio.sleep(wait)
+                try:
+                    resp = await client.get(url, headers=headers)
+                    resp.raise_for_status()
+                    last_data = resp.json()
+                    last_error = None
+                    break
+                except (httpx.ConnectTimeout, httpx.ConnectError, httpx.ReadTimeout) as exc:
+                    last_error = exc
+                    continue
+                except Exception as exc:  # noqa: BLE001
+                    last_error = exc
+                    break
+            if last_error is not None:
+                failures.append(f"{page_no}쪽({last_error.__class__.__name__})")
                 continue
 
             for row in collect_product_rows(
@@ -1892,13 +1911,31 @@ SNX_PAGE = (
 )
 SNX_API = "https://snxbest.naver.com/api/v1/snxbest/product"
 
+LOTTEON_API = (
+    "https://pbf.lotteon.com/display/v2/async/best/bestProductTwo/products"
+    "?sort=ranking&size=100&collectionId=SELECT&dshopNo=59216&mallNo=1"
+    "&tmplNo=365&tmplSeq=16416&dcornId=best_product_two&dcornNo=M001638"
+    "&dcornLnkSeq=1113288&dpInfwCd=CAT59216&areaId=cateBest&dcatNo=A&period=hourly"
+)
+
 
 def build_collectors() -> list[Collector]:
+    """
+    환경변수 TREND_BOARD_DISABLE 에 소스 이름을 적으면 그 소스를 끈다.
+    깃허브에서만 막히는 소스를 로컬은 그대로 두고 제외할 때 쓴다.
+      예) TREND_BOARD_DISABLE=lotteon_best
+    """
     """
     확인된 것은 구현해 두고, 확인이 필요한 것은 껍데기만 두었다.
     enabled=False 인 항목은 화면에 '설정 필요' 상태로 표시된다.
     """
-    return [
+    disabled = {
+        name.strip()
+        for name in os.environ.get("TREND_BOARD_DISABLE", "").split(",")
+        if name.strip()
+    }
+
+    sources: list[Collector] = [
         # ---- 1. 네이버 데이터랩 분야별 인기 검색어 (구현됨)
         NaverDatalabKeyword(),
 
@@ -1947,22 +1984,17 @@ def build_collectors() -> list[Collector]:
             ],
         ),
 
-        # ---- 4. 11번가 BEST
-        # 페이지는 빈 껍데기라 목록 API를 직접 부른다. 응답 구조는 자동으로 찾는다.
+        # ---- 4. 롯데ON BEST
         AutoJsonCollector(
-            key="elevenst_best",
-            label="11번가 BEST",
-            source_url="https://www.11st.co.kr/page/best",
-            api_url=[
-                "https://apis.11st.co.kr/pui/v2/page?pageId=PCBEST",
-                "https://apis.11st.co.kr/pui/v2/page"
-                "?pageId=PCBEST&blckSn=34975&pageMode=NEXT&pageNo=2",
-            ],
+            key="lotteon_best",
+            label="롯데ON BEST",
+            source_url="https://www.lotteon.com/p/display/main/lotteon",
+            api_url=LOTTEON_API,
             kind="product",
-            url_template="https://www.11st.co.kr/products/{id}",
+            url_template="https://www.lotteon.com/p/product/{id}",
             interval=3600,
             limit=PRODUCT_LIMIT,
-            note="전체 베스트 상위 100개",
+            note="시간별 베스트 상위 100개",
         ),
 
         # ---- 5. 옥션 BEST (링크 패턴 기반, 검증 필요)
@@ -1982,3 +2014,10 @@ def build_collectors() -> list[Collector]:
         ),
 
     ]
+
+    for source in sources:
+        if source.key in disabled:
+            source.enabled = False
+            source.note = "이 환경에서는 꺼져 있습니다."
+    return sources
+
